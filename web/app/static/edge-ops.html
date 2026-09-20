@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>边端运维观测 · Managed Python</title>
+  <link rel="stylesheet" href="/static/styles.css">
+  <link rel="stylesheet" href="/static/edge.css">
+  <script defer src="/static/edge-ops.js"></script>
+</head>
+<body>
+  <header class="appbar">
+    <div class="topbar-inner">
+      <a class="brand" href="/">
+        <span class="brand-mark" aria-hidden="true">MP</span>
+        <span>Managed Python</span>
+        <span class="brand-divider" aria-hidden="true"></span>
+        <span class="brand-product">Edge Operations</span>
+      </a>
+      <div class="topbar-right">
+        <nav class="edge-console-links">
+          <a href="/">发布算子</a>
+          <a href="/admin/edge">边端管理</a>
+        </nav>
+      </div>
+    </div>
+  </header>
+
+  <main class="edge-console">
+    <div class="edge-console-header">
+      <div>
+        <span class="eyebrow">EDGE NATIVE · OPERATIONS</span>
+        <h1>发布与 Bundle 观测</h1>
+        <p>查看 NiFi Native 发布任务、失败原因和 Edge Bundle revision 历史。</p>
+      </div>
+      <div class="edge-console-actions">
+        <button id="refreshBtn" class="button secondary" type="button">刷新</button>
+        <a class="button primary" href="/admin/edge">查看当前环境</a>
+      </div>
+    </div>
+
+    <div id="notice" class="notice hidden" role="status">
+      <span class="notice-mark">i</span>
+      <span id="noticeText"></span>
+    </div>
+
+    <section id="metrics" class="edge-metrics"></section>
+
+    <section class="panel">
+      <div class="section-heading">
+        <span class="section-number">01</span>
+        <div>
+          <h2>最近 Native 发布任务</h2>
+          <p>包含成功、失败和依赖冲突任务；失败不会切换当前边端环境。</p>
+        </div>
+      </div>
+      <div id="operationList" class="edge-op-list"></div>
+    </section>
+
+    <section class="panel">
+      <div class="section-heading">
+        <span class="section-number">02</span>
+        <div>
+          <h2>Bundle Revision 历史</h2>
+          <p>每个成功 revision 都是完整快照，可用于下载、校验和回滚。</p>
+        </div>
+      </div>
+      <div class="edge-table-wrap">
+        <table class="edge-table">
+          <thead>
+            <tr>
+              <th>Revision</th>
+              <th>目标平台</th>
+              <th>Processor</th>
+              <th>依赖包</th>
+              <th>Lock SHA</th>
+              <th>Artifact SHA</th>
+              <th>时间</th>
+            </tr>
+          </thead>
+          <tbody id="bundleRows"></tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+</body>
+</html>

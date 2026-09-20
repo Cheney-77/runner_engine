@@ -51,6 +51,13 @@ class NativeProperty(BaseModel):
     default: Any | None = None
 
 
+class NativeTargetPlatform(BaseModel):
+    os: Literal["linux", "windows"]
+    arch: Literal["x86_64", "aarch64"]
+    python_version: str
+    uv_python_platform: str
+
+
 class NifiNativeBackendContract(BackendContractBase):
     backend: Literal["nifi_native"] = "nifi_native"
     processor_type: Literal["FlowFileTransform"] = "FlowFileTransform"
@@ -58,4 +65,5 @@ class NifiNativeBackendContract(BackendContractBase):
     package_name: str
     properties: list[NativeProperty] = Field(default_factory=list)
     requirements: list[str] = Field(default_factory=list)
-    deployment_mode: Literal["package_only"] = "package_only"
+    target_platform: NativeTargetPlatform
+    deployment_mode: Literal["edge_shared_environment"] = "edge_shared_environment"

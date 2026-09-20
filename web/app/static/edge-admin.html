@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>边端环境管理 · Managed Python</title>
+  <link rel="stylesheet" href="/static/styles.css">
+  <link rel="stylesheet" href="/static/edge.css">
+  <script defer src="/static/edge-admin.js"></script>
+</head>
+<body>
+  <header class="appbar">
+    <div class="topbar-inner">
+      <a class="brand" href="/">
+        <span class="brand-mark" aria-hidden="true">MP</span>
+        <span>Managed Python</span>
+        <span class="brand-divider" aria-hidden="true"></span>
+        <span class="brand-product">Edge Admin</span>
+      </a>
+      <div class="topbar-right">
+        <nav class="edge-console-links">
+          <a href="/">发布算子</a>
+          <a href="/ops/edge">运维观测</a>
+        </nav>
+      </div>
+    </div>
+  </header>
+
+  <main class="edge-console">
+    <div class="edge-console-header">
+      <div>
+        <span class="eyebrow">EDGE NATIVE · ADMIN</span>
+        <h1>边端共享环境</h1>
+        <p>查看 user 1 在各目标平台下当前生效的 NiFi Native 算子与共享依赖集合。</p>
+      </div>
+      <div class="edge-console-actions">
+        <button id="refreshBtn" class="button secondary" type="button">刷新</button>
+        <a class="button primary" href="/">发布新算子</a>
+      </div>
+    </div>
+
+    <div id="notice" class="notice hidden" role="status">
+      <span class="notice-mark">i</span>
+      <span id="noticeText"></span>
+    </div>
+
+    <section id="metrics" class="edge-metrics"></section>
+
+    <section class="panel">
+      <div class="section-heading">
+        <span class="section-number">01</span>
+        <div>
+          <h2>当前环境</h2>
+          <p>每个 user + OS + CPU + Python 版本是一套独立共享环境。</p>
+        </div>
+      </div>
+      <div id="environmentList" class="edge-env-list"></div>
+    </section>
+
+    <section class="panel">
+      <div class="section-heading">
+        <span class="section-number">02</span>
+        <div>
+          <h2>最近 Bundle</h2>
+          <p>Bundle 是完整快照，包含共享 dependencies 与当前生效 processor 集合。</p>
+        </div>
+      </div>
+      <div class="edge-table-wrap">
+        <table class="edge-table">
+          <thead>
+            <tr>
+              <th>Revision</th>
+              <th>目标平台</th>
+              <th>Processor</th>
+              <th>依赖包</th>
+              <th>SHA256</th>
+              <th>创建时间</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody id="bundleRows"></tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+</body>
+</html>
