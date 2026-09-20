@@ -1,0 +1,10 @@
+{
+  "gvisor": {
+    "url": "http://127.0.0.1:8080",
+    "api_key": "a7aea6a340e46b95b497ba0ca4866abd835270d19ebc8e1a50c8215817a9630e"
+  },
+  "kata": {
+    "url": "http://opensandbox-kata:8080",
+    "api_key": "replace-me"
+  }
+}

@@ -1,0 +1,11 @@
+.quality-tag.exact{color:#137333;background:#e6f4ea}
+.exact-checks{margin-top:19px;border-top:1px solid #e8eaed;padding-top:15px}
+.exact-checks h4{font-size:12px;margin:0 0 11px;color:#374151}
+.check-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:9px}
+.check-card{border:1px solid #e6e9ef;border-radius:9px;padding:11px;
+ background:#fafbfe;display:flex;flex-direction:column;gap:5px}
+.check-name{font-size:10px;color:#5f6368}
+.check-count{font-size:22px;font-variant-numeric:tabular-nums}
+.check-card.high .check-count{color:#b3261e}
+.check-card.warning .check-count{color:#92620a}
+@media(max-width:580px){.check-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}

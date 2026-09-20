@@ -1,0 +1,8 @@
+{
+  "identities": {
+    "nifi-prod-cluster": {
+      "tenant-a": ["project-x", "project-y"],
+      "tenant-b": ["*"]
+    }
+  }
+}

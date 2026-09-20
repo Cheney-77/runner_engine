@@ -1,0 +1,171 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#ffffff">
+  <meta name="referrer" content="no-referrer">
+  <title>Observability · Managed Python</title>
+  <link rel="stylesheet" href="/observe/static/styles.css">
+  <script defer src="/observe/static/dashboard.js"></script>
+</head>
+<body>
+  <div id="loadingStrip" class="loading-strip hidden" aria-hidden="true"><span></span></div>
+  <header class="header">
+    <div class="header-inner">
+      <div class="brand">
+        <span class="brand-icon" aria-hidden="true">
+          <svg viewBox="0 0 32 32" width="24" height="24" fill="none">
+            <rect width="32" height="32" rx="10" fill="#1A73E8"/>
+            <path d="M6 19h5l3-9 4 13 3-7h5" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </span>
+        <strong>Managed Python</strong>
+        <span class="brand-divider"></span>
+        <span class="brand-subtitle">Observability</span>
+      </div>
+      <div class="top-actions">
+        <span class="readonly"><span class="tiny-lock">◈</span> 只读视图</span>
+        <span id="globalHealth" class="connection-pill"><span class="health-dot"></span>检测中</span>
+      </div>
+    </div>
+  </header>
+
+  <div class="app-layout">
+    <aside class="sidebar" aria-label="观测导航">
+      <p class="nav-label">MONITORING</p>
+      <button id="navDatabase" class="nav-item active" type="button" data-view="database" aria-current="page">
+        <span class="nav-icon" aria-hidden="true">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><ellipse cx="12" cy="5" rx="8" ry="3" stroke="currentColor" stroke-width="1.6"/><path d="M4 5v7c0 1.7 3.6 3.2 8 3.2s8-1.5 8-3.2V5M4 12v7c0 1.7 3.6 3 8 3s8-1.3 8-3v-7" stroke="currentColor" stroke-width="1.6"/></svg>
+        </span>
+        数据库指标
+        <span id="dbNavBadge" class="nav-badge">—</span>
+      </button>
+      <button id="navSandbox" class="nav-item" type="button" data-view="sandbox">
+        <span class="nav-icon" aria-hidden="true">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><rect x="3" y="4" width="18" height="16" rx="3" stroke="currentColor" stroke-width="1.6"/><path d="M3 10h18M9 10v10M15 10v10" stroke="currentColor" stroke-width="1.6"/></svg>
+        </span>
+        OpenSandbox
+        <span id="sandboxNavBadge" class="nav-badge">—</span>
+      </button>
+      <div class="sidebar-bottom">
+        <div class="aside-callout">
+          <div class="aside-callout-title">数据来源</div>
+          <p>数据库统计来自只读查询；Sandbox 状态来自 Lifecycle API，资源使用率来自独立的 execd 指标。</p>
+        </div>
+        <span class="sidebar-version">OBSERVABILITY · 0.1</span>
+      </div>
+    </aside>
+
+    <main class="main">
+      <section class="page-top">
+        <div>
+          <span class="eyebrow">OPERATIONS / OBSERVABILITY</span>
+          <h1 id="pageTitle" tabindex="-1">数据库指标</h1>
+          <p id="pageSubtitle">Publish、Build 与 Runner 的持久化状态汇总。</p>
+        </div>
+        <div class="toolbar">
+          <label for="autoRefresh" class="refresh-label">刷新频率</label>
+          <select id="autoRefresh" aria-label="自动刷新频率">
+            <option value="0">关闭</option>
+            <option value="20000" selected>20 秒</option>
+            <option value="60000">60 秒</option>
+          </select>
+          <button id="refreshBtn" class="primary-button" type="button">
+            <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M20 12a8 8 0 1 1-2.4-5.7L20 8.5M20 3v5.5h-5.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            立即刷新
+          </button>
+        </div>
+      </section>
+      <div class="snapshot-row">
+        <span><span id="refreshDot" class="snapshot-dot"></span> <span id="sampleTime">尚未采集</span></span>
+        <span id="refreshNote">当前展示实时快照，不是历史监控记录</span>
+      </div>
+      <div id="globalError" class="error-banner hidden" role="alert"></div>
+
+      <section id="databaseView" class="view" aria-labelledby="databaseTitle">
+        <div class="kpi-grid">
+          <article class="kpi-card"><span class="kpi-label">CONNECTED DATABASES</span>
+            <div class="kpi-value" id="connectedDb">—</div><span class="kpi-foot">3 个独立数据源</span></article>
+          <article class="kpi-card"><span class="kpi-label">PUBLISH JOBS</span>
+            <div class="kpi-value" id="publishJobs">—</div><span class="kpi-foot">发布任务记录总量</span></article>
+          <article class="kpi-card"><span class="kpi-label">BUILD ENVIRONMENTS</span>
+            <div class="kpi-value" id="buildEnvs">—</div><span class="kpi-foot">运行环境记录总量</span></article>
+          <article class="kpi-card"><span class="kpi-label">RUNNER RELEASES</span>
+            <div class="kpi-value" id="runnerReleases">—</div><span class="kpi-foot">已识别的 Release 记录</span></article>
+        </div>
+
+        <div class="section-title" id="databaseTitle">
+          <div><h2>服务数据库</h2><p>优先匹配已确认的表；其他表可在结构信息中查看。</p></div>
+          <span id="databaseCoverage" class="coverage-pill">—</span>
+        </div>
+        <div id="databaseCards" class="database-stack" aria-live="polite"></div>
+
+        <div class="footnote">
+          <strong>指标口径</strong>
+          <p>计数基于数据库表的当前总行数；“最近 24 小时”只在可识别时间字段时展示。
+          服务未连接或表名无法确认时显示「—」，不会用 0 代替未知值。指标不等于 API 调用耗时或错误率。</p>
+        </div>
+      </section>
+
+      <section id="sandboxView" class="view hidden" aria-labelledby="sandboxTitle">
+        <div class="kpi-grid">
+          <article class="kpi-card">
+            <span class="kpi-label">RUNNING SANDBOXES</span><div id="sandboxRunning" class="kpi-value">—</div>
+            <span class="kpi-foot">Lifecycle API 报告的 Running 数量</span>
+          </article>
+          <article class="kpi-card">
+            <span class="kpi-label">LISTED SANDBOXES</span><div id="sandboxListed" class="kpi-value">—</div>
+            <span class="kpi-foot">本次实际读取的实例</span>
+          </article>
+          <article class="kpi-card">
+            <span class="kpi-label">RESOURCE SAMPLES</span><div id="sandboxMeasured" class="kpi-value">—</div>
+            <span class="kpi-foot">成功获取 execd 实时数据的实例</span>
+          </article>
+          <article class="kpi-card">
+            <span class="kpi-label">MEMORY · SAMPLED</span><div id="sandboxMemory" class="kpi-value">—</div>
+            <span class="kpi-foot">仅累计已成功采样的内存</span>
+          </article>
+        </div>
+
+        <div class="section-title" id="sandboxTitle">
+          <div><h2>正在运行的 Sandbox</h2><p>按实例查看运行时间、过期时间与资源快照。</p></div>
+          <span id="sandboxCoverage" class="coverage-pill">—</span>
+        </div>
+        <div id="sandboxWarning" class="info-banner hidden" role="status"></div>
+        <div class="table-card">
+          <div class="table-toolbar">
+            <label class="searchbox" for="sandboxSearch">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><circle cx="10.5" cy="10.5" r="6.5" stroke="currentColor" stroke-width="1.7"/><path d="m16 16 4.5 4.5" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>
+              <input id="sandboxSearch" type="search" placeholder="搜索 Sandbox ID、镜像…" autocomplete="off">
+            </label>
+            <label for="sandboxSort" class="sort-label">排序</label>
+            <select id="sandboxSort" aria-label="排序方式">
+              <option value="longest">运行时间最长</option>
+              <option value="newest">最新创建</option>
+              <option value="cpu">CPU 使用率</option>
+              <option value="memory">内存用量</option>
+            </select>
+          </div>
+          <div id="sandboxTable" class="table-scroll">
+            <table>
+              <thead><tr>
+                <th>Sandbox</th><th>状态</th><th>运行时长</th><th>到期</th>
+                <th>CPU</th><th>内存</th><th>资源状态</th>
+              </tr></thead>
+              <tbody id="sandboxRows"><tr><td colspan="7" class="empty-cell">正在获取数据…</td></tr></tbody>
+            </table>
+          </div>
+          <div class="table-footer"><span id="tableCount">尚未采集</span>
+            <span>CPU / 内存来自 execd，仅代表采样时刻</span></div>
+        </div>
+        <div class="footnote"><strong>运行时长的含义</strong>
+          <p>使用 Sandbox 的 createdAt 到采样时刻计算存续时间，暂停期间也会计入；
+          不代表 CPU 累计运行时间。资源指标需要已授权的 execd 端点，
+          未接通时显示「未采集」，而不是 0。</p></div>
+      </section>
+      <footer class="footer">Managed Python Observability · read-only · 独立服务</footer>
+    </main>
+  </div>
+</body>
+</html>

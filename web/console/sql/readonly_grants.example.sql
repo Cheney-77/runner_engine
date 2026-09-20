@@ -1,0 +1,23 @@
+-- DBA EXAMPLE. Run separately in EACH PostgreSQL database.
+-- Replace the login/schema names with YOUR actual OBS_*_DB_URL / *_DB_SCHEMA.
+-- In publish_db, for example:
+-- GRANT CONNECT ON DATABASE publish_db TO observer_readonly;
+-- GRANT USAGE ON SCHEMA publish TO observer_readonly;
+-- GRANT SELECT ON ALL TABLES IN SCHEMA publish TO observer_readonly;
+--
+-- In build_db:
+-- GRANT CONNECT ON DATABASE build_db TO observer_readonly;
+-- GRANT USAGE ON SCHEMA build TO observer_readonly;
+-- GRANT SELECT ON ALL TABLES IN SCHEMA build TO observer_readonly;
+--
+-- In runner_db:
+-- GRANT CONNECT ON DATABASE runner_db TO observer_readonly;
+-- GRANT USAGE ON SCHEMA runner TO observer_readonly;
+-- GRANT SELECT ON ALL TABLES IN SCHEMA runner TO observer_readonly;
+--
+-- When schemas are customized, substitute OBS_PUBLISH_DB_SCHEMA,
+-- OBS_BUILD_DB_SCHEMA, OBS_RUNNER_DB_SCHEMA respectively.
+-- Never grant business table UPDATE / DELETE to observer_readonly.
+-- Admin metadata (console_ops) uses a DIFFERENT, limited role configured by
+-- ADMIN_DB_URL; see admin/sql/001_admin_schema.sql.
+-- Do not execute template placeholders as real SQL.

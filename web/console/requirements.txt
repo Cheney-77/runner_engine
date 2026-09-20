@@ -1,0 +1,2 @@
+-r ../requirements.txt
+-r ../observe/requirements-postgres.txt

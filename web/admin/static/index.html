@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<title>运行资产管理 · Managed Python</title>
+<link rel="stylesheet" href="/admin/static/styles.css">
+<script defer src="/admin/static/admin.js"></script>
+</head>
+<body>
+<header class="top"><div class="top-inner">
+<span class="logo" aria-hidden="true">M</span>
+<strong>Managed Python</strong><span class="brand-separator"></span><span class="product-name">Operations</span>
+<nav class="top-nav" aria-label="模块导航">
+<a href="/console/">总览</a><a href="/">发布</a><a href="/observe/">观测</a><a class="current" href="/admin/">资产管理</a>
+</nav>
+<span class="secure-chip">管理工作台</span>
+</div></header>
+<div class="layout">
+<aside class="sidebar" aria-label="资产管理功能">
+<span class="nav-heading">MANAGEMENT</span>
+<button class="nav active" data-view="overview">总览</button>
+<button class="nav" data-view="environments">运行环境</button>
+<button class="nav" data-view="runner">Runner 执行</button>
+<button class="nav" data-view="publish">发布记录</button>
+<button class="nav" data-view="requests">清理申请</button>
+<button class="nav" data-view="notes">资产备注</button>
+<button class="nav" data-view="audit">操作审计</button>
+<div class="sidebar-foot">管理元数据与业务服务数据分开存储。</div>
+</aside>
+<main class="main">
+<div class="heading"><div><span class="eyebrow">OPERATIONS / ASSETS</span>
+<h1 id="pageTitle" tabindex="-1">运行资产总览</h1>
+<p id="pageHint">检查构建、执行和发布状态，追踪需要处理的资产。</p></div>
+<button id="refreshBtn" class="button primary" type="button">刷新数据</button></div>
+<div id="feedback" class="feedback hidden" role="status" aria-live="polite"></div>
+<div id="loading" class="loading hidden" aria-live="polite">正在读取…</div>
+
+<section id="view-overview" class="view">
+<div class="kpis">
+<div class="kpi"><span>运行环境</span><strong id="envCount">—</strong><small>Build Service</small></div>
+<div class="kpi"><span>有效租约</span><strong id="leaseCount">—</strong><small>Runner Engine</small></div>
+<div class="kpi"><span>失败构建</span><strong id="failedBuildCount">—</strong><small>最近记录</small></div>
+<div class="kpi"><span>待处理申请</span><strong id="draftCount">—</strong><small>管理记录</small></div>
+</div>
+<div class="panel"><div class="panel-heading"><h2>运行风险</h2><p>结合实际数据库表查询，展示需要关注的记录。</p></div>
+<div id="riskCards" class="risk-grid"></div></div>
+<div class="panel"><h2>清理流程</h2>
+<div class="process"><div><span>01</span><strong>清查资产</strong><small>确认环境、别名和引用</small></div>
+<div><span>02</span><strong>清理预检</strong><small>发现阻断条件</small></div>
+<div><span>03</span><strong>记录申请</strong><small>保存原因和现场快照</small></div>
+<div><span>04</span><strong>服务端执行</strong><small>经资产所有者接口执行</small></div></div>
+<p class="note">当前控制台提供前三步。物理镜像删除和业务缓存失效尚未接入执行接口。</p>
+</div>
+</section>
+
+<section id="view-environments" class="view hidden">
+<div class="panel"><div class="panel-heading"><h2>Build 运行环境</h2><p>以 build.runtime_environments 为准，显示最新 100 条。</p></div>
+<div class="table-toolbar"><input id="envSearch" type="search" placeholder="搜索 env_key、状态或镜像…" aria-label="搜索环境">
+<span id="envCoverage" class="chip">—</span></div>
+<div class="table-scroll"><table><thead><tr>
+<th>环境</th><th>状态</th><th>镜像引用</th><th>依赖数</th><th>更新时间</th><th>操作</th>
+</tr></thead><tbody id="envRows"></tbody></table></div></div>
+<div class="panel"><h2>构建任务</h2><p class="sub">最近 70 条记录；错误详情不会出现在当前列表。</p>
+<div class="table-scroll"><table><thead><tr><th>Job ID</th><th>环境 ID</th><th>状态</th><th>创建时间</th></tr></thead>
+<tbody id="buildJobRows"></tbody></table></div></div>
+</section>
+
+<section id="view-runner" class="view hidden">
+<div class="panel"><h2>租约</h2><p class="sub">用于判断 Release 是否仍被引用，过期租约不自动视为可删除。</p>
+<div class="table-scroll"><table><thead><tr><th>Lease ID</th><th>Tenant</th><th>Release ID</th><th>到期</th></tr></thead>
+<tbody id="leaseRows"></tbody></table></div></div>
+<div class="panel"><h2>执行记录</h2><p class="sub">最新 70 条。长时间 RUNNING 或 ABANDONED 需要核查。</p>
+<div class="table-scroll"><table><thead><tr><th>Run ID</th><th>Release ID</th><th>状态</th><th>耗时</th><th>开始时间</th></tr></thead>
+<tbody id="runRows"></tbody></table></div></div>
+<div class="panel"><h2>幂等记录</h2><p class="sub">不展示原始 idempotency_key 或 result_json。</p>
+<div class="table-scroll"><table><thead><tr><th>Tenant</th><th>Release ID</th><th>状态</th><th>重放次数</th><th>到期</th></tr></thead>
+<tbody id="idempotencyRows"></tbody></table></div></div>
+</section>
+
+<section id="view-publish" class="view hidden">
+<div class="panel"><h2>Backend Variants</h2><p class="sub">来自 publish.backend_variants。</p>
+<div class="table-scroll"><table><thead><tr><th>Variant</th><th>Backend</th><th>状态</th><th>制品引用</th><th>更新时间</th></tr></thead>
+<tbody id="variantRows"></tbody></table></div></div>
+<div class="panel"><h2>发布任务</h2><p class="sub">来自 publish.publish_jobs，按创建时间倒序。</p>
+<div class="table-scroll"><table><thead><tr><th>Job</th><th>Variant</th><th>状态</th><th>制品</th><th>创建时间</th></tr></thead>
+<tbody id="publishJobRows"></tbody></table></div></div>
+</section>
+
+<section id="view-requests" class="view hidden">
+<div class="panel">
+<div class="panel-heading"><h2>环境清理预检</h2><p>先选环境，核查正在构建的任务和 Runner 租约等引用。</p></div>
+<div class="field"><label for="environmentSelect">选择运行环境</label>
+<select id="environmentSelect"><option value="">请选择</option></select></div>
+<div class="actions"><button id="previewBtn" class="button secondary" type="button">运行预检</button></div>
+<div id="previewResult" class="preview hidden"></div>
+<form id="cleanupForm" class="hidden">
+<div class="separator"></div><h3>保存清理申请</h3>
+<p class="sub">该操作仅保存申请和审计，不会删除镜像、数据库行或 Release。</p>
+<div class="field"><label for="cleanupReason">申请原因</label>
+<textarea id="cleanupReason" rows="3" minlength="10" maxlength="1000" required placeholder="说明环境的用途、计划清理的原因及核验情况"></textarea></div>
+<div class="field"><label for="cleanupConfirm">输入 env_key 确认</label>
+<input id="cleanupConfirm" autocomplete="off" spellcheck="false" required placeholder="完整输入上方的 env_key"></div>
+<div class="actions"><button id="requestBtn" class="button primary" type="submit">保存清理申请</button></div>
+</form></div>
+<div class="panel"><h2>清理申请记录</h2><p class="sub">仅支持申请与撤销；物理删除尚未接通。</p>
+<div class="table-scroll"><table><thead><tr><th>申请 ID</th><th>环境</th><th>状态</th><th>原因</th><th>操作</th></tr></thead>
+<tbody id="requestRows"></tbody></table></div></div>
+</section>
+
+<section id="view-notes" class="view hidden">
+<div class="panel"><h2>资产备注</h2><p class="sub">支持创建、修改和删除管理备注，操作记录独立保存。</p>
+<form id="noteForm"><div class="form-grid">
+<div class="field"><label for="noteType">资产类型</label><select id="noteType" required>
+<option value="build_environment">Build 环境</option>
+<option value="runner_lease">Runner 租约</option>
+<option value="runner_run">Runner 执行</option>
+<option value="publish_variant">发布变体</option></select></div>
+<div class="field"><label for="noteAsset">资产 ID</label>
+<input id="noteAsset" maxlength="160" autocomplete="off" required placeholder="填写准确的 UUID 或资产标识"></div></div>
+<div class="field"><label for="noteText">备注</label><textarea id="noteText" rows="3" maxlength="1000" required></textarea></div>
+<div class="actions"><button id="noteCreateBtn" type="submit" class="button primary">保存备注</button></div></form></div>
+<div class="panel"><h2>现有备注</h2><div id="noteList" class="note-list"></div></div>
+</section>
+
+<section id="view-audit" class="view hidden">
+<div class="panel"><h2>操作审计</h2><p class="sub">最新 80 条管理动作，仅在管理数据库配置后可用。</p>
+<div class="table-scroll"><table><thead><tr><th>时间</th><th>操作人</th><th>动作</th><th>资产</th></tr></thead>
+<tbody id="auditRows"></tbody></table></div></div>
+</section>
+<footer>Managed Python Operations · 内网管理视图 · 变更操作记录审计</footer>
+</main></div>
+<dialog id="confirmDialog" aria-labelledby="dialogTitle"><h2 id="dialogTitle">确认操作</h2><p id="dialogText"></p>
+<div class="actions"><button id="cancelActionBtn" class="button secondary">取消</button>
+<button id="confirmActionBtn" class="button danger">确认</button></div></dialog>
+</body></html>

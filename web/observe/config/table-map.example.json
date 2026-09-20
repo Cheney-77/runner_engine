@@ -1,0 +1,25 @@
+{
+  "publish": {
+    "operators": "YOUR_OPERATOR_TABLE",
+    "contracts": "YOUR_CONTRACT_VERSION_TABLE",
+    "variants": {
+      "table": "YOUR_VARIANT_TABLE",
+      "statusColumn": "YOUR_STATUS_COLUMN",
+      "groupColumn": "YOUR_BACKEND_COLUMN",
+      "timeColumn": "YOUR_CREATION_TIME_COLUMN"
+    },
+    "jobs": "YOUR_PUBLISH_JOB_TABLE"
+  },
+  "build": {
+    "environments": {
+      "table": "YOUR_ENVIRONMENT_TABLE",
+      "statusColumn": "YOUR_STATE_COLUMN"
+    },
+    "jobs": "YOUR_BUILD_JOB_TABLE"
+  },
+  "runner": {
+    "releases": "YOUR_RELEASE_TABLE",
+    "executions": "YOUR_EXECUTION_TABLE",
+    "jobs": "YOUR_RUNNER_JOB_TABLE"
+  }
+}

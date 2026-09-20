@@ -1,0 +1,18 @@
+{
+  "standard": {
+    "sandbox_cluster": "gvisor",
+    "cpu": "1",
+    "memory": "512Mi",
+    "max_timeout_ms": 60000,
+    "network_allow": [],
+    "reuse_sandbox": true
+  },
+  "hardened": {
+    "sandbox_cluster": "kata",
+    "cpu": "2",
+    "memory": "1Gi",
+    "max_timeout_ms": 30000,
+    "network_allow": [],
+    "reuse_sandbox": false
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "gvisor": {
+    "url": "http://opensandbox-gvisor:8080",
+    "api_key": "replace-me"
+  },
+  "kata": {
+    "url": "http://opensandbox-kata:8080",
+    "api_key": "replace-me"
+  }
+}

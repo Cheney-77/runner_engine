@@ -1,0 +1,365 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#ffffff">
+  <title>创建算子 · Managed Python</title>
+  <link rel="stylesheet" href="/static/styles.css">
+  <script defer src="/static/schema.js"></script>
+  <script defer src="/static/form.js"></script>
+  <script defer src="/static/binding.js"></script>
+  <script defer src="/static/ui.js"></script>
+</head>
+<body>
+  <div id="globalProgress" class="global-progress hidden" aria-hidden="true"><span></span></div>
+  <header class="appbar">
+    <div class="topbar-inner">
+      <a class="brand" href="/" aria-label="Managed Python 控制台首页">
+        <span class="brand-mark" aria-hidden="true">
+          <svg viewBox="0 0 32 32" width="27" height="27" fill="none">
+            <rect x="2" y="2" width="28" height="28" rx="9" fill="#1A73E8"/>
+            <path d="M10 23V9h6.7c4.2 0 6.3 2 6.3 5.2 0 3.3-2.2 5.2-6.3 5.2h-3.4V23H10Zm3.3-6.7h3.1c2.1 0 3.1-.7 3.1-2.1s-1-2.1-3.1-2.1h-3.1v4.2Z" fill="white"/>
+          </svg>
+        </span>
+        <span>Managed Python</span>
+        <span class="brand-divider" aria-hidden="true"></span>
+        <span class="brand-product">Operator Console</span>
+      </a>
+      <div class="topbar-right">
+        <span class="version-tag">v3.3</span>
+        <span id="serviceStatus" class="service-state checking" aria-live="polite">
+          <span class="status-dot" aria-hidden="true"></span><span id="serviceStatusText">Publish Service · 正在连接</span>
+        </span>
+      </div>
+    </div>
+  </header>
+
+  <nav class="journey" aria-label="算子创建步骤">
+    <div class="journey-inner">
+      <ol class="step-nav" id="stepNav">
+        <li><button type="button" data-step="0" class="step-button active"><span class="step-number">1</span><span>工作区</span></button></li>
+        <li><button type="button" data-step="1" class="step-button" disabled><span class="step-number">2</span><span>选择入口</span></button></li>
+        <li><button type="button" data-step="2" class="step-button" disabled><span class="step-number">3</span><span>契约配置</span></button></li>
+        <li><button type="button" data-step="3" class="step-button" disabled><span class="step-number">4</span><span>确认创建</span></button></li>
+        <li><button type="button" data-step="4" class="step-button" disabled><span class="step-number">5</span><span>编译发布</span></button></li>
+      </ol>
+    </div>
+  </nav>
+
+  <main class="main" id="mainContent">
+    <div id="contextStrip" class="context-strip hidden" aria-label="当前项目上下文">
+      <span class="context-item"><span class="context-caption">工作区</span><strong id="contextWorkspace">—</strong></span>
+      <span class="context-divider" aria-hidden="true"></span>
+      <span class="context-item"><span class="context-caption">Python Root</span><strong id="contextRoot">—</strong></span>
+      <span id="contextCallableItem" class="context-item hidden"><span class="context-divider" aria-hidden="true"></span><span class="context-caption">入口</span><strong id="contextCallable">—</strong></span>
+    </div>
+    <div id="notice" class="notice hidden" role="status" aria-live="polite">
+      <span class="notice-mark" aria-hidden="true">i</span>
+      <span id="noticeText"></span>
+      <button id="dismissNotice" class="icon-button" type="button" aria-label="关闭提示">×</button>
+    </div>
+
+    <!-- 01 Workspace -->
+    <section class="step-page" id="step0" aria-labelledby="workspaceTitle">
+      <div class="page-heading">
+        <span class="eyebrow">01 / 05 · SOURCE</span>
+        <h1 id="workspaceTitle" tabindex="-1">选择工作区</h1>
+        <p>从已部署的项目目录开始，自动发现 Python 入口。</p>
+      </div>
+      <div class="workspace-layout">
+        <div class="panel workspace-form">
+          <div class="panel-header">
+            <div><h2>项目位置</h2><p>输入需要发布的项目路径。</p></div>
+            <span class="label-pill">必填</span>
+          </div>
+          <div class="root-hint">
+            <span class="root-icon" aria-hidden="true">⌂</span>
+            <div><span class="meta-label">服务端工作区根目录</span><code>/data/user-workspace</code></div>
+          </div>
+          <div class="field">
+            <label for="workspace">Workspace</label>
+            <input id="workspace" type="text" autocomplete="off" spellcheck="false" placeholder="例如：order-risk" aria-describedby="workspaceHelp">
+            <small id="workspaceHelp">只填写相对路径；不需要输入前面的根目录。</small>
+          </div>
+          <div class="path-preview" aria-live="polite">
+            <span class="meta-label">将由服务端定位到</span>
+            <code id="workspacePreview">/data/user-workspace/…</code>
+          </div>
+          <div class="field root-picker">
+            <label for="requestedRoot">Python Root</label>
+            <select id="requestedRoot"><option value="">自动检测（推荐）</option></select>
+            <small>分析后可选择检测到的目录；切换目录需要重新分析。</small>
+          </div>
+          <div class="panel-actions">
+            <button id="analyzeBtn" class="button primary" type="button">分析源代码 <span class="arrow" aria-hidden="true">→</span></button>
+          </div>
+        </div>
+        <aside class="help-card" aria-labelledby="workGuide">
+          <div class="help-icon" aria-hidden="true">i</div>
+          <h2 id="workGuide">工作区如何定位？</h2>
+          <p>工作区中的代码将在提交前完成分析。</p>
+          <div class="help-divider"></div>
+          <div class="guide-row"><span>1</span>指定项目相对路径</div>
+          <div class="guide-row"><span>2</span>检测 <code>src</code> 或 <code>.</code></div>
+          <div class="guide-row"><span>3</span>扫描函数及参数</div>
+          <div class="help-foot">工作区根目录由管理员配置。</div>
+        </aside>
+      </div>
+      <div id="analyzeSummary" class="panel result-panel hidden">
+        <div class="result-banner">
+          <span class="result-icon" aria-hidden="true">✓</span>
+          <div><h2>分析完成</h2><p>已锁定本次源码版本。可以选择一个可用入口继续。</p></div>
+          <span class="success-pill">已分析</span>
+        </div>
+        <div class="analysis-metrics">
+          <div><span class="meta-label">工作区</span><strong id="analyzedWorkspace"></strong></div>
+          <div><span class="meta-label">Python Root</span><strong id="analyzedRoot"></strong></div>
+          <div><span class="meta-label">可调用入口</span><strong id="callableCount"></strong></div>
+        </div>
+        <div class="revision-line"><span>Source revision</span><code id="revision"></code><button type="button" class="text-button" data-copy-target="revision">复制</button></div>
+        <div id="warningBox" class="warning hidden"></div>
+        <details class="developer-details"><summary>分析响应 · 查看 JSON</summary><pre id="analyzeRaw" class="json-view"></pre></details>
+        <div class="panel-actions"><button id="toCallablesBtn" class="button primary" type="button">选择调用入口 <span class="arrow" aria-hidden="true">→</span></button></div>
+      </div>
+    </section>
+
+    <!-- 02 Callable -->
+    <section class="step-page hidden" id="step1" aria-labelledby="callableTitle">
+      <div class="page-heading">
+        <span class="eyebrow">02 / 05 · ENTRYPOINT</span>
+        <h1 id="callableTitle" tabindex="-1">选择调用入口</h1>
+        <p>挑选代码中的一个函数或方法，右侧即可预览签名和参数。</p>
+      </div>
+      <div class="panel callable-panel">
+        <div class="catalog-toolbar">
+          <label class="search-field" for="callableSearch">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="10.8" cy="10.8" r="6.6" stroke="currentColor" stroke-width="1.8"/><path d="m16 16 4.6 4.6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+            <input id="callableSearch" type="search" placeholder="搜索函数、类或文件…" autocomplete="off">
+          </label>
+          <label class="filter-toggle"><input type="checkbox" id="showUnsupported"> 显示不可用入口</label>
+        </div>
+        <div id="catalogCount" class="catalog-count" aria-live="polite"></div>
+        <div class="callable-layout">
+          <div id="callableCatalog" class="callable-catalog" role="radiogroup" aria-label="可调用入口"></div>
+          <aside id="callableDetails" class="callable-inspector details hidden" aria-live="polite"></aside>
+        </div>
+      </div>
+      <div class="step-actions">
+        <button id="backWorkspaceBtn" class="button secondary" type="button">← 返回</button>
+        <span class="action-hint">选择一个支持的入口继续</span>
+        <button id="toBindingsBtn" class="button primary" type="button">配置契约 <span class="arrow" aria-hidden="true">→</span></button>
+      </div>
+    </section>
+
+    <!-- 03 Contract -->
+    <section class="step-page hidden" id="step2" aria-labelledby="contractTitle">
+      <div class="page-heading">
+        <span class="eyebrow">03 / 05 · CONTRACT</span>
+        <h1 id="contractTitle" tabindex="-1">配置算子契约</h1>
+        <p>先选择参数来源，再填写对应的配置。</p>
+      </div>
+      <div id="schemaUnavailable" class="warning hidden" role="alert"></div>
+      <button id="reloadSchemaBtn" class="button secondary hidden" type="button">重新读取请求模型</button>
+      <div class="contract-layout">
+        <div class="contract-body">
+          <section id="operatorPanel" class="panel config-panel">
+            <div class="section-heading">
+              <span class="section-number">01</span>
+              <div><h2>算子信息</h2><p>设置名称等基础信息。</p></div>
+            </div>
+            <div id="operatorEditor"></div>
+          </section>
+          <section id="constructorPanel" class="panel config-panel">
+            <div class="section-heading">
+              <span class="section-number">02</span>
+              <div><h2>构造参数</h2><p>仅在选中实例方法时需要配置。</p></div>
+              <span id="constructorCount" class="section-count"></span>
+            </div>
+            <div id="constructorBindings"></div>
+          </section>
+          <section id="argumentsPanel" class="panel config-panel">
+            <div class="section-heading">
+              <span class="section-number">03</span>
+              <div><h2>调用参数</h2><p>选择来源，按实际字段填写必要的参数值。</p></div>
+              <span id="argumentCount" class="section-count"></span>
+            </div>
+            <div id="argumentBindings"></div>
+          </section>
+          <section id="outputPanel" class="panel config-panel">
+            <div class="section-heading">
+              <span class="section-number">04</span>
+              <div><h2>输出映射</h2><p>确认返回值的输出位置和格式。</p></div>
+            </div>
+            <div id="outputEditor"></div>
+            <p id="outputTypeHint" class="output-type-hint hidden"></p>
+            <div id="outputTypeWarning" class="codec-advice hidden" role="status"></div>
+          </section>
+          <section id="additionalPanel" class="panel config-panel hidden">
+            <div class="section-heading"><span class="section-number">+</span>
+              <div><h2>扩展字段</h2><p>其他可选配置。</p></div>
+            </div>
+            <div id="additionalEditor"></div>
+          </section>
+        </div>
+        <aside class="contract-aside">
+          <div class="aside-card">
+            <span class="eyebrow">当前选择</span>
+            <strong id="selectedCallableBadge">—</strong>
+            <span class="meta-label">参数绑定填写进度</span>
+            <div id="contractProgress" class="completion-line">尚未配置</div>
+            <div class="mini-progress"><span id="contractProgressBar"></span></div>
+            <button id="asideReviewBtn" class="button primary aside-continue" type="button">查看契约摘要 →</button>
+            <div class="aside-divider"></div>
+            <a href="#operatorPanel">算子信息</a>
+            <a href="#constructorPanel" id="constructorJump">构造参数</a>
+            <a href="#argumentsPanel">调用参数</a>
+            <a href="#outputPanel">输出映射</a>
+            <p>可选参数可以跳过。选择参数来源后，可按需要应用推荐配置。</p>
+          </div>
+        </aside>
+      </div>
+      <div class="step-actions">
+        <button id="backCallablesBtn" class="button secondary" type="button">← 返回</button>
+        <span class="action-hint">将自动汇总为 Virtual Contract</span>
+        <button id="reviewBtn" class="button primary" type="button">查看契约摘要 <span class="arrow" aria-hidden="true">→</span></button>
+      </div>
+    </section>
+
+    <!-- 04 Review -->
+    <section class="step-page hidden" id="step3" aria-labelledby="reviewTitle">
+      <div class="page-heading">
+        <span class="eyebrow">04 / 05 · REVIEW</span>
+        <h1 id="reviewTitle" tabindex="-1">确认创建</h1>
+        <p>确认工作区、入口与参数绑定，确保这是你希望保存的契约。</p>
+      </div>
+      <div class="panel">
+        <div class="section-heading"><span class="section-icon" aria-hidden="true">✓</span>
+          <div><h2>契约摘要</h2><p>以下内容来自你刚才确认的选择。</p></div>
+        </div>
+        <dl class="review-facts">
+          <div><dt>Workspace</dt><dd id="reviewWorkspace"></dd></div>
+          <div><dt>Callable</dt><dd id="reviewCallable"></dd></div>
+          <div><dt>Source Revision</dt><dd><code id="reviewRevision"></code></dd></div>
+        </dl>
+        <div id="reviewCounts" class="summary-grid"></div>
+        <div id="reviewOutputWarning" class="codec-advice hidden" role="status"></div>
+        <div id="reviewBindings" class="review-bindings"></div>
+        <details class="developer-details"><summary>详细配置 · 查看请求内容</summary>
+          <div class="copy-row"><button type="button" class="text-button" data-copy-target="requestPreview">复制请求</button></div>
+          <pre id="requestPreview" class="json-view"></pre>
+        </details>
+        <details class="developer-details">
+          <summary>自定义请求内容</summary>
+          <p class="muted">修改这里的内容后，将以修改后的配置创建算子。</p>
+          <label class="inline-check"><input type="checkbox" id="overrideRequest"> 手动编辑完整配置</label>
+          <textarea id="overrideBody" class="json-editor" spellcheck="false" disabled></textarea>
+        </details>
+        <div id="createError" class="warning hidden" role="alert"></div>
+      </div>
+      <div class="confirmation">
+        <label for="confirmReview" class="confirm-label">
+          <input type="checkbox" id="confirmReview">
+          <span><strong>确认创建这份契约</strong><small>我已核对 Callable、参数绑定及输出配置。</small></span>
+        </label>
+      </div>
+      <div class="step-actions">
+        <button id="editContractBtn" class="button secondary" type="button">← 修改配置</button>
+        <span class="action-hint">创建时服务端会检查 Source Revision</span>
+        <button id="createBtn" class="button primary" type="button" disabled>创建算子 <span class="arrow" aria-hidden="true">→</span></button>
+      </div>
+    </section>
+
+    <!-- 05 Release -->
+    <section class="step-page hidden" id="step4" aria-labelledby="publishTitle">
+      <div class="page-heading">
+        <span class="eyebrow">05 / 05 · RELEASE</span>
+        <h1 id="publishTitle" tabindex="-1">编译与发布</h1>
+        <p>契约已保存。选择运行后端，再执行编译或发布。</p>
+      </div>
+      <section class="panel created-panel">
+        <div class="created-banner"><span class="created-check" aria-hidden="true">✓</span>
+          <div><h2>Virtual Contract 已创建</h2><p>已保存算子及不可变源码快照。</p></div>
+          <span class="success-pill">创建成功</span>
+        </div>
+        <dl class="created-facts">
+          <div><dt>Operator ID</dt><dd><code id="createdOperatorId"></code>
+            <button type="button" class="text-button" data-copy-target="createdOperatorId">复制</button></dd></div>
+          <div><dt>Contract ID</dt><dd><code id="createdContractId"></code></dd></div>
+          <div><dt>版本</dt><dd id="createdVersion"></dd></div>
+          <div><dt>Source Ref</dt><dd><code id="createdSourceRef"></code></dd></div>
+        </dl>
+        <div class="inline-tools"><button id="getOperatorBtn" class="button secondary small" type="button">刷新算子详情</button></div>
+        <details class="developer-details"><summary>高级信息 · 查看创建响应</summary><pre id="createResponse" class="json-view"></pre></details>
+        <div id="operatorReadResult" class="result hidden"><h3>Operator 查询响应</h3><pre id="operatorReadJson" class="json-view"></pre></div>
+      </section>
+      <section class="panel backend-panel">
+        <div class="section-heading"><span class="section-number">01</span>
+          <div><h2>选择执行后端</h2><p>两个后端使用同一份 Virtual Contract。</p></div>
+        </div>
+        <div class="field">
+          <label for="backend">Backend</label>
+          <select id="backend"></select>
+        </div>
+        <p id="backendDescription" class="backend-description muted"></p>
+        <div id="quickProfileField" class="field hidden">
+          <label for="runnerProfile">Runner Profile <span class="optional-label">可选</span></label>
+          <input id="runnerProfile" type="text" autocomplete="off" placeholder="留空使用服务端默认 profile">
+          <small>本字段对应 options.profile。其他选项可在高级配置中编辑。</small>
+        </div>
+        <details id="advancedOptions" class="developer-details">
+          <summary>其他运行选项</summary>
+          <div class="field advanced-body"><label for="options">后端选项（JSON）</label>
+            <textarea id="options" class="json-editor small" spellcheck="false">{}</textarea>
+            <small>只有需要自定义高级运行选项时才填写。</small>
+          </div>
+        </details>
+        <div class="backend-actions">
+          <button id="compileBtn" class="button secondary" type="button">先编译检查</button>
+          <button id="publishBtn" class="button primary" type="button">发布到所选后端 <span class="arrow" aria-hidden="true">→</span></button>
+        </div>
+        <p class="micro-note">可以直接发布；也可以先编译检查配置。</p>
+      </section>
+      <section id="compilePanel" class="panel outcome-panel hidden">
+        <div class="section-heading"><span class="section-icon" aria-hidden="true">✓</span>
+          <div><h2>编译结果</h2><p id="compileResultCaption"></p></div>
+          <span id="compileStatusBadge" class="success-pill"></span>
+        </div>
+        <div id="compileSummary" class="summary-grid"></div>
+        <details class="developer-details"><summary>高级信息 · 查看 Compile 响应</summary>
+          <div class="copy-row"><button type="button" class="text-button" data-copy-target="compileResponse">复制结果</button></div>
+          <pre id="compileResponse" class="json-view"></pre>
+        </details>
+      </section>
+      <section id="publishPanel" class="panel outcome-panel hidden">
+        <div class="section-heading"><span class="section-icon" aria-hidden="true">✓</span>
+          <div><h2>发布结果</h2><p id="publishResultCaption"></p></div>
+          <span id="publishStatusBadge" class="success-pill"></span>
+        </div>
+        <div id="publishSummary" class="summary-grid"></div>
+        <div id="nativeNotice" class="warning hidden"></div>
+        <details class="developer-details"><summary>高级信息 · 查看 Publish 响应</summary>
+          <div class="copy-row"><button type="button" class="text-button" data-copy-target="publishResponse">复制结果</button></div>
+          <pre id="publishResponse" class="json-view"></pre>
+        </details>
+      </section>
+    </section>
+    <footer class="footer">Managed Python · Operator Console</footer>
+  </main>
+
+  <dialog id="publishDialog" class="publish-dialog" aria-labelledby="publishDialogTitle" aria-describedby="publishDialogDescription">
+    <div class="modal-symbol" aria-hidden="true">↑</div>
+    <h2 id="publishDialogTitle">确认发布算子？</h2>
+    <p id="publishDialogDescription">确认后将创建发布任务，请检查算子和运行后端。</p>
+    <dl class="modal-facts">
+      <div><dt>Operator ID</dt><dd id="publishConfirmOperator"></dd></div>
+      <div><dt>执行后端</dt><dd id="publishConfirmBackend"></dd></div>
+    </dl>
+    <div id="publishModalHint" class="modal-hint"></div>
+    <div class="modal-actions">
+      <button id="cancelPublishBtn" class="button secondary" type="button">取消</button>
+      <button id="confirmPublishBtn" class="button primary" type="button">确认发布</button>
+    </div>
+  </dialog>
+</body>
+</html>

@@ -1,0 +1,75 @@
+syntax = "proto3";
+
+package dsc.runner.v33;
+
+option java_package = "com.dsc.nifi.proto";
+option java_multiple_files = true;
+
+service ManagedPythonRunner {
+  rpc Health(HealthRequest) returns (HealthResponse);
+  rpc AcquireLease(AcquireLeaseRequest) returns (LeaseResponse);
+  rpc RenewLease(RenewLeaseRequest) returns (LeaseResponse);
+  rpc Invoke(InvokeRequest) returns (InvokeResponse);
+  rpc Cancel(CancelRequest) returns (CancelResponse);
+  rpc ReleaseLease(ReleaseLeaseRequest) returns (ReleaseLeaseResponse);
+}
+
+message HealthRequest {}
+message HealthResponse {
+  bool ok = 1;
+  string version = 2;
+}
+
+message AcquireLeaseRequest {
+  string tenant_id = 1;
+  string project_id = 2;
+  string processor_id = 3;
+  string release_id = 4;
+}
+
+message RenewLeaseRequest {
+  string tenant_id = 1;
+  string lease_id = 2;
+}
+
+message LeaseResponse {
+  string lease_id = 1;
+  int64 expires_at_epoch_ms = 2;
+}
+
+message InvokeRequest {
+  string tenant_id = 1;
+  string lease_id = 2;
+  string release_id = 3;
+  string invocation_id = 4;
+  string idempotency_key = 5;
+  bytes content = 6;
+  map<string,string> attributes = 7;
+  map<string,string> parameters = 8;
+  int32 timeout_ms = 9;
+}
+
+message InvokeResponse {
+  string status = 1;
+  string relationship = 2;
+  bytes content = 3;
+  map<string,string> attributes = 4;
+  bool retryable = 5;
+  string error_code = 6;
+  string error_message = 7;
+  string worker_id = 8;
+  int32 duration_ms = 9;
+}
+
+message CancelRequest {
+  string tenant_id = 1;
+  string lease_id = 2;
+  string invocation_id = 3;
+}
+message CancelResponse { bool cancelled = 1; }
+
+message ReleaseLeaseRequest {
+  string tenant_id = 1;
+  string lease_id = 2;
+}
+message ReleaseLeaseResponse { bool released = 1; }
