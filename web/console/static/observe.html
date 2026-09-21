@@ -9,6 +9,7 @@
   <link rel="stylesheet" href="/observe/static/styles.css">
   <link rel="stylesheet" href="/console/static/observe-addon.css">
   <script defer src="/console/static/observe-dashboard.js"></script>
+  <script defer src="/observe/static/runtime.js"></script>
 </head>
 <body>
   <div id="loadingStrip" class="loading-strip hidden" aria-hidden="true"><span></span></div>
@@ -31,7 +32,6 @@
       </div>
     </div>
   </header>
-
   <div class="app-layout">
     <aside class="sidebar" aria-label="观测导航">
       <p class="nav-label">MONITORING</p>
@@ -57,7 +57,6 @@
         <span class="sidebar-version">OBSERVABILITY · 0.1</span>
       </div>
     </aside>
-
     <main class="main">
       <section class="page-top">
         <div>
@@ -95,13 +94,11 @@
           <article class="kpi-card"><span class="kpi-label">REFERENCED RELEASE IDS</span>
             <div class="kpi-value" id="runnerReleases">—</div><span class="kpi-foot">租约引用的不同 Release ID，非实际制品数</span></article>
         </div>
-
         <div class="section-title" id="databaseTitle">
           <div><h2>服务数据库</h2><p>使用 Publish、Build、Runner 三套固定 PostgreSQL Schema 查询。</p></div>
           <span id="databaseCoverage" class="coverage-pill">—</span>
         </div>
         <div id="databaseCards" class="database-stack" aria-live="polite"></div>
-
         <div class="footnote">
           <strong>指标口径</strong>
           <p>计数基于数据库表的当前总行数；“最近 24 小时”只在可识别时间字段时展示。
@@ -128,7 +125,6 @@
             <span class="kpi-foot">仅累计已成功采样的内存</span>
           </article>
         </div>
-
         <div class="section-title" id="sandboxTitle">
           <div><h2>正在运行的 Sandbox</h2><p>按实例查看运行时间、过期时间与资源快照。</p></div>
           <span id="sandboxCoverage" class="coverage-pill">—</span>

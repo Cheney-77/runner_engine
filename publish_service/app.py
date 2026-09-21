@@ -11,6 +11,8 @@ import uvicorn
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse
 
+from .lifecycle_routes import install_publish_lifecycle_routes
+from .lifecycle_service import LifecyclePublishService
 from .model import AnalyzeRequest, BackendRequest, CreateVirtualContractRequest
 from .service import (
     EdgeDependencyConflictError,
@@ -36,7 +38,7 @@ def _configure_logging(level_name: str) -> None:
         root.addHandler(handler)
 
 
-def _service_from_env() -> PublishService:
+def _service_from_env() -> LifecyclePublishService:
     workspace_root = os.environ.get("PUBLISH_WORKSPACE_ROOT", "")
     catalog_root = os.environ.get("PUBLISH_CATALOG_ROOT", "")
     source_root = os.environ.get("PUBLISH_SOURCE_ROOT", "")
@@ -64,7 +66,7 @@ def _service_from_env() -> PublishService:
         else catalog_path / "_nifi_native_packages"
     )
 
-    return PublishService(
+    return LifecyclePublishService(
         PublishSettings(
             workspace_root=Path(workspace_root),
             catalog_root=catalog_path,
@@ -128,8 +130,10 @@ def create_app(service: PublishService | None = None) -> FastAPI:
     async def lifespan(app: FastAPI):
         active_service = service or _service_from_env()
         app.state.publish_service = active_service
-        logger.info("Publish Service started")
-
+        logger.info(
+            "Publish Service started lifecycle=%s",
+            type(active_service).__name__,
+        )
         try:
             yield
         finally:
@@ -152,6 +156,10 @@ def create_app(service: PublishService | None = None) -> FastAPI:
             "backends": ["runner", "nifi_native"],
             "compiledPlanArtifact": False,
             "edgeNativePublishing": True,
+            "runtimeLifecycle": True,
+            "adminLifecycleConfigured": bool(
+                os.environ.get("PUBLISH_ADMIN_TOKEN", "").strip()
+            ),
         }
 
     @application.get("/v1/edge/platforms")
@@ -184,20 +192,14 @@ def create_app(service: PublishService | None = None) -> FastAPI:
         )
 
     @application.post("/v1/authoring/analyze")
-    def analyze(
-        payload: AnalyzeRequest,
-        request: Request,
-    ) -> dict:
+    def analyze(payload: AnalyzeRequest, request: Request) -> dict:
         try:
             return request.app.state.publish_service.analyze(
                 payload.workspace,
                 python_root=payload.python_root,
             )
         except (ValueError, PublishError) as exc:
-            raise HTTPException(
-                status_code=400,
-                detail=str(exc),
-            ) from exc
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     @application.post("/v1/operators")
     def create_operator(
@@ -209,28 +211,17 @@ def create_app(service: PublishService | None = None) -> FastAPI:
                 payload
             )
         except (ValueError, PublishError) as exc:
-            raise HTTPException(
-                status_code=400,
-                detail=str(exc),
-            ) from exc
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
         except Exception:
             logger.exception("Creating virtual operator contract failed")
             raise
 
     @application.get("/v1/operators/{operator_id}")
-    def get_operator(
-        operator_id: str,
-        request: Request,
-    ) -> dict:
+    def get_operator(operator_id: str, request: Request) -> dict:
         try:
-            return request.app.state.publish_service.get_operator(
-                operator_id
-            )
+            return request.app.state.publish_service.get_operator(operator_id)
         except PublishError as exc:
-            raise HTTPException(
-                status_code=404,
-                detail=str(exc),
-            ) from exc
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
 
     @application.post(
         "/v1/operators/{operator_id}/backends/{backend}/compile"
@@ -248,15 +239,9 @@ def create_app(service: PublishService | None = None) -> FastAPI:
                 payload.options,
             )
         except EdgeDependencyConflictError as exc:
-            raise HTTPException(
-                status_code=409,
-                detail=exc.detail,
-            ) from exc
+            raise HTTPException(status_code=409, detail=exc.detail) from exc
         except (ValueError, PublishError) as exc:
-            raise HTTPException(
-                status_code=400,
-                detail=str(exc),
-            ) from exc
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
         except Exception:
             logger.exception("Backend contract compilation failed")
             raise
@@ -277,19 +262,14 @@ def create_app(service: PublishService | None = None) -> FastAPI:
                 payload.options,
             )
         except EdgeDependencyConflictError as exc:
-            raise HTTPException(
-                status_code=409,
-                detail=exc.detail,
-            ) from exc
+            raise HTTPException(status_code=409, detail=exc.detail) from exc
         except (ValueError, PublishError) as exc:
-            raise HTTPException(
-                status_code=409,
-                detail=str(exc),
-            ) from exc
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
         except Exception:
             logger.exception("Backend publish failed")
             raise
 
+    install_publish_lifecycle_routes(application)
     return application
 
 
@@ -302,27 +282,16 @@ def main() -> None:
     )
     parser.add_argument(
         "--listen-host",
-        default=os.environ.get(
-            "PUBLISH_LISTEN_HOST",
-            "127.0.0.1",
-        ),
+        default=os.environ.get("PUBLISH_LISTEN_HOST", "127.0.0.1"),
     )
     parser.add_argument(
         "--listen-port",
         type=int,
-        default=int(
-            os.environ.get(
-                "PUBLISH_LISTEN_PORT",
-                "9090",
-            )
-        ),
+        default=int(os.environ.get("PUBLISH_LISTEN_PORT", "9090")),
     )
     parser.add_argument(
         "--log-level",
-        default=os.environ.get(
-            "PUBLISH_LOG_LEVEL",
-            "INFO",
-        ),
+        default=os.environ.get("PUBLISH_LOG_LEVEL", "INFO"),
     )
     args = parser.parse_args()
 

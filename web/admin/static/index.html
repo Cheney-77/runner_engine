@@ -6,6 +6,7 @@
 <title>运行资产管理 · Managed Python</title>
 <link rel="stylesheet" href="/admin/static/styles.css">
 <script defer src="/admin/static/admin.js"></script>
+<script defer src="/admin/static/lifecycle.js"></script>
 </head>
 <body>
 <header class="top"><div class="top-inner">
@@ -48,9 +49,9 @@
 <div class="panel"><h2>清理流程</h2>
 <div class="process"><div><span>01</span><strong>清查资产</strong><small>确认环境、别名和引用</small></div>
 <div><span>02</span><strong>清理预检</strong><small>发现阻断条件</small></div>
-<div><span>03</span><strong>记录申请</strong><small>保存原因和现场快照</small></div>
-<div><span>04</span><strong>服务端执行</strong><small>经资产所有者接口执行</small></div></div>
-<p class="note">当前控制台提供前三步。物理镜像删除和业务缓存失效尚未接入执行接口。</p>
+<div><span>03</span><strong>安装门禁并排空</strong><small>Build / Publish / Runner</small></div>
+<div><span>04</span><strong>安全删除 Artifact</strong><small>经资产所有者接口执行</small></div></div>
+<p class="note">配置 Owner Service lifecycle API 后，控制台会重新检查引用、安装门禁、等待活动 invocation / sandbox 排空，再由 Build Service 删除 Harbor Artifact；历史业务记录不会删除。</p>
 </div>
 </section>
 
@@ -96,14 +97,14 @@
 <div id="previewResult" class="preview hidden"></div>
 <form id="cleanupForm" class="hidden">
 <div class="separator"></div><h3>保存清理申请</h3>
-<p class="sub">该操作仅保存申请和审计，不会删除镜像、数据库行或 Release。</p>
+<p class="sub">申请会保存原因和预检快照；真正执行时还会重新检查当前引用。</p>
 <div class="field"><label for="cleanupReason">申请原因</label>
 <textarea id="cleanupReason" rows="3" minlength="10" maxlength="1000" required placeholder="说明环境的用途、计划清理的原因及核验情况"></textarea></div>
 <div class="field"><label for="cleanupConfirm">输入 env_key 确认</label>
 <input id="cleanupConfirm" autocomplete="off" spellcheck="false" required placeholder="完整输入上方的 env_key"></div>
 <div class="actions"><button id="requestBtn" class="button primary" type="submit">保存清理申请</button></div>
 </form></div>
-<div class="panel"><h2>清理申请记录</h2><p class="sub">仅支持申请与撤销；物理删除尚未接通。</p>
+<div class="panel"><h2>清理申请记录</h2><p class="sub">Owner Service lifecycle API 配置完整后，DRAFT 申请会出现“执行清理 / 继续清理”按钮。</p>
 <div class="table-scroll"><table><thead><tr><th>申请 ID</th><th>环境</th><th>状态</th><th>原因</th><th>操作</th></tr></thead>
 <tbody id="requestRows"></tbody></table></div></div>
 </section>
@@ -128,6 +129,7 @@
 <div class="table-scroll"><table><thead><tr><th>时间</th><th>操作人</th><th>动作</th><th>资产</th></tr></thead>
 <tbody id="auditRows"></tbody></table></div></div>
 </section>
+
 <footer>Managed Python Operations · 内网管理视图 · 变更操作记录审计</footer>
 </main></div>
 <dialog id="confirmDialog" aria-labelledby="dialogTitle"><h2 id="dialogTitle">确认操作</h2><p id="dialogText"></p>

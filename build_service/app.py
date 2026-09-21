@@ -10,8 +10,10 @@ import uvicorn
 from fastapi import FastAPI, HTTPException, Request
 from pydantic import BaseModel
 
+from .harbor import HarborClient
+from .lifecycle_routes import install_build_lifecycle_routes
+from .lifecycle_service import LifecycleBuildService, LifecycleBuildStore
 from .service import BuildService, BuildSettings
-from .store import BuildStore
 
 
 class ResolveRequest(BaseModel):
@@ -56,10 +58,11 @@ def _serialize_environment(row) -> dict:
         "image": row["image_ref"],
         "error": row["last_error"],
         "canRetry": row["status"] == "FAILED",
+        "lifecycleState": row.get("lifecycle_state", "ACTIVE"),
     }
 
 
-def _service_from_env() -> BuildService:
+def _service_from_env() -> LifecycleBuildService:
     database_url = os.environ.get("BUILD_DATABASE_URL", "")
     base_image = os.environ.get("BUILD_RUNNER_BASE_IMAGE", "")
     registry_repo = os.environ.get("BUILD_REGISTRY_REPO", "")
@@ -73,18 +76,27 @@ def _service_from_env() -> BuildService:
         if not value:
             raise RuntimeError(f"{name} is required")
 
-    store = BuildStore(database_url)
+    store = LifecycleBuildStore(database_url)
     settings = BuildSettings(
         base_image=base_image,
         registry_repo=registry_repo,
         python_version=os.environ.get("BUILD_PYTHON_VERSION", "3.12"),
         platform=os.environ.get("BUILD_PLATFORM", "linux/amd64"),
-        uv_python_platform=os.environ.get("BUILD_UV_PYTHON_PLATFORM", "x86_64-unknown-linux-gnu"),
+        uv_python_platform=os.environ.get(
+            "BUILD_UV_PYTHON_PLATFORM",
+            "x86_64-unknown-linux-gnu",
+        ),
         build_policy_version=os.environ.get("BUILD_POLICY_VERSION", "1"),
         uv_default_index=os.environ.get("UV_DEFAULT_INDEX"),
-        allow_superset_reuse=_as_bool(os.environ.get("BUILD_ALLOW_SUPERSET_REUSE", "true")),
+        allow_superset_reuse=_as_bool(
+            os.environ.get("BUILD_ALLOW_SUPERSET_REUSE", "true")
+        ),
     )
-    return BuildService(store, settings)
+    return LifecycleBuildService(
+        store,
+        settings,
+        harbor=HarborClient.from_env(),
+    )
 
 
 _configure_logging(os.environ.get("BUILD_LOG_LEVEL", "INFO"))
@@ -96,7 +108,10 @@ def create_app(service: BuildService | None = None) -> FastAPI:
     async def lifespan(app: FastAPI):
         active_service = service or _service_from_env()
         app.state.build_service = active_service
-        logger.info("Build Service started")
+        logger.info(
+            "Build Service started lifecycle=%s",
+            type(active_service).__name__,
+        )
         try:
             yield
         finally:
@@ -112,7 +127,15 @@ def create_app(service: BuildService | None = None) -> FastAPI:
 
     @application.get("/health")
     def health() -> dict:
-        return {"ok": True, "version": "3.3.0"}
+        return {
+            "ok": True,
+            "version": "3.3.0",
+            "runtimeLifecycle": True,
+            "adminLifecycleConfigured": bool(
+                os.environ.get("BUILD_ADMIN_TOKEN", "").strip()
+            ),
+            "harborLifecycleConfigured": HarborClient.from_env() is not None,
+        }
 
     @application.post("/v1/runtime-environments/resolve")
     def resolve(payload: ResolveRequest, request: Request) -> dict:
@@ -129,7 +152,10 @@ def create_app(service: BuildService | None = None) -> FastAPI:
     def get_environment(env_key: str, request: Request) -> dict:
         row = request.app.state.build_service.get(env_key)
         if row is None:
-            raise HTTPException(status_code=404, detail="runtime environment not found")
+            raise HTTPException(
+                status_code=404,
+                detail="runtime environment not found",
+            )
         return _serialize_environment(row)
 
     @application.post("/v1/runtime-environments/{env_key}/retry")
@@ -138,13 +164,20 @@ def create_app(service: BuildService | None = None) -> FastAPI:
             row = request.app.state.build_service.retry(env_key)
             return _serialize_environment(row)
         except KeyError as exc:
-            raise HTTPException(status_code=404, detail="runtime environment not found") from exc
+            raise HTTPException(
+                status_code=404,
+                detail="runtime environment not found",
+            ) from exc
         except ValueError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
         except Exception:
-            logger.exception("Runtime environment retry failed env_key=%s", env_key)
+            logger.exception(
+                "Runtime environment retry failed env_key=%s",
+                env_key,
+            )
             raise
 
+    install_build_lifecycle_routes(application)
     return application
 
 
@@ -152,17 +185,31 @@ app = create_app()
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Managed Python Build Service v3.3")
-    parser.add_argument("--listen-host", default=os.environ.get("BUILD_LISTEN_HOST", "127.0.0.1"))
-    parser.add_argument("--listen-port", type=int, default=int(os.environ.get("BUILD_LISTEN_PORT", "9088")))
-    parser.add_argument("--log-level", default=os.environ.get("BUILD_LOG_LEVEL", "INFO"))
+    parser = argparse.ArgumentParser(
+        description="Managed Python Build Service v3.3"
+    )
+    parser.add_argument(
+        "--listen-host",
+        default=os.environ.get("BUILD_LISTEN_HOST", "127.0.0.1"),
+    )
+    parser.add_argument(
+        "--listen-port",
+        type=int,
+        default=int(os.environ.get("BUILD_LISTEN_PORT", "9088")),
+    )
+    parser.add_argument(
+        "--log-level",
+        default=os.environ.get("BUILD_LOG_LEVEL", "INFO"),
+    )
     args = parser.parse_args()
 
     _configure_logging(args.log_level)
-
-    # Keep Uvicorn's normal server/access logging. Build Service application logs use
-    # the dedicated build_service logger configured above.
-    uvicorn.run(app, host=args.listen_host, port=args.listen_port, log_level=args.log_level.lower())
+    uvicorn.run(
+        app,
+        host=args.listen_host,
+        port=args.listen_port,
+        log_level=args.log_level.lower(),
+    )
 
 
 if __name__ == "__main__":
