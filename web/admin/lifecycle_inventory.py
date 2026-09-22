@@ -89,8 +89,8 @@ class LifecycleInventory:
                         v.published_metadata->>'runtimeEnvKey' = %s
                         OR v.published_metadata->>'envKey' = %s
                         OR (
-                            %s IS NOT NULL
-                            AND v.published_metadata->>'runtimeImage' = %s
+                            %s::text IS NOT NULL
+                            AND v.published_metadata->>'runtimeImage' = %s::text
                         )
                       )
                     ORDER BY o.display_name, v.updated_at DESC
@@ -122,7 +122,11 @@ class LifecycleInventory:
                     "Current Publish references exceed the lifecycle query limit."
                 )
         except Exception as exc:
-            log.warning("Current Publish reference check failed (%s)", type(exc).__name__)
+            log.warning(
+                "Current Publish reference check failed (%s): %s",
+                type(exc).__name__,
+                exc,
+            )
             preview["currentPublishedReferences"] = []
             preview["blockingReasons"].append(
                 "Cannot verify CURRENT Publish references; cleanup must not proceed."

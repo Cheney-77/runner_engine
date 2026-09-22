@@ -10,7 +10,7 @@ class SnapshotError(ValueError):
     pass
 
 
-def snapshot_workspace(source: str | Path, destination: str | Path, *, max_bytes: int = 20 * 1024 * 1024) -> Path:
+def snapshot_workspace(source: str | Path, destination: str | Path, *, max_bytes: int = 200 * 1024 * 1024) -> Path:
     source_root = Path(source).resolve()
     destination_root = Path(destination).resolve()
 

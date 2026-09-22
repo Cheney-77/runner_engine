@@ -66,7 +66,7 @@ class PublishSettings:
     edge_uv_default_index: str | None = None
     edge_require_binary: bool = True
     build_timeout_seconds: int = 1800
-    max_source_bytes: int = 20 * 1024 * 1024
+    max_source_bytes: int = 500 * 1024 * 1024
 
 
 class PublishService:

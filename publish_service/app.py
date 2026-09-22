@@ -114,7 +114,7 @@ def _service_from_env() -> LifecyclePublishService:
             max_source_bytes=int(
                 os.environ.get(
                     "PUBLISH_MAX_SOURCE_BYTES",
-                    str(20 * 1024 * 1024),
+                    str(500 * 1024 * 1024),
                 )
             ),
         )

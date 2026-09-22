@@ -282,7 +282,10 @@ class Inventory:
                              AND (
                                 result_json->>'envKey' = %s
                                 OR result_json->>'runtimeEnvKey' = %s
-                                OR (%s IS NOT NULL AND result_json->>'runtimeImage' = %s)
+                                OR (
+                                    %s::text IS NOT NULL
+                                    AND result_json->>'runtimeImage' = %s::text
+                                )
                              )
                            LIMIT 101""",
                         (key, key, image, image),

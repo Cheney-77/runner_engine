@@ -14,7 +14,7 @@ class SourceStoreError(RuntimeError):
 
 
 class LocalSourceStore:
-    def __init__(self, root: str | Path, *, max_source_bytes: int = 20 * 1024 * 1024):
+    def __init__(self, root: str | Path, *, max_source_bytes: int = 500 * 1024 * 1024):
         self.root = Path(root).resolve()
         self.root.mkdir(parents=True, exist_ok=True)
         self.max_source_bytes = max_source_bytes
