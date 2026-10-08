@@ -33,6 +33,8 @@ class RunnerParameter(BaseModel):
     required: bool = False
     has_default: bool = False
     default: Any | None = None
+    parameter_type: str = "str"
+
 
 
 class RunnerBackendContract(BackendContractBase):
@@ -49,6 +51,7 @@ class NativeProperty(BaseModel):
     required: bool = False
     has_default: bool = False
     default: Any | None = None
+    property_type: str = "str"
 
 
 class NativeTargetPlatform(BaseModel):

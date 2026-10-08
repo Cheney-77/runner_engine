@@ -41,7 +41,7 @@ class PublishStore:
         workspace: str,
         contract: VirtualOperatorContract,
         *,
-        user_id: int = 1,
+        user_id: str = 1,
     ):
         digest = contract_sha256(contract)
         payload = contract.model_dump(mode="json")
@@ -136,6 +136,74 @@ class PublishStore:
                 """,
                 (operator_id, user_id),
             ).fetchone()
+
+    def get_operator_list(self, run_type: str, user_id: str):
+        with self.pool.connection() as conn:
+            if run_type == "runner":
+                res = conn.execute(
+                    """
+                        SELECT DISTINCT ON (o.id)
+                            o.id as operator_id,
+                            o.name as operator_name,
+                            o.display_name as operator_displayname,
+                            o.description as operator_description,
+                            bv.published_metadata->>'releaseId' as release_id,
+                            bv.backend_contract_json->>'parameters' as operator_properties,
+                            cv.id as contract_id,
+                            cv.version as operator_version,
+                            bv.id  as variant_id,
+                            bv.backend,
+                            bv.published_ref as artifact_ref
+
+                        FROM publish.operators o
+                        JOIN publish.virtual_contract_versions cv
+                            ON cv.operator_id = o.id
+                        JOIN publish.backend_variants bv
+                            ON bv.contract_id = cv.id
+                        WHERE o.user_id = %s
+                          AND bv.backend = 'runner'
+                          AND bv.status = 'PUBLISHED'
+                          AND bv.compiler_version = 'runner-contract-v4'
+                          ORDER BY
+                              o.id,
+                              cv.version DESC
+                    """,
+                    (user_id,),
+                ).fetchall()
+            else:
+                res = conn.execute(
+                    """
+                    SELECT DISTINCT ON (o.id, target_platform)
+                        o.id as operator_id,
+                        o.name as operator_name,
+                        o.display_name as operator_displayname,
+                        o.description as operator_description,
+                        bv.backend_contract_json->>'class_name' as operator_classname,
+                        bv.backend_contract_json->>'target_platform' as target_platform,
+                        bv.backend_contract_json->>'properties' as operator_properties,
+                        cv.id as contract_id,
+                        cv.version as operator_version,
+                        bv.id as variant_id,
+                        bv.backend,
+                        bv.published_ref as artifact_ref
+                        
+                    FROM publish.operators o
+                    JOIN publish.virtual_contract_versions cv
+                        ON cv.operator_id = o.id
+                    JOIN publish.backend_variants bv
+                        ON bv.contract_id = cv.id
+                    WHERE o.user_id = %s
+                      AND bv.backend = 'nifi_native'
+                      AND bv.status = 'PUBLISHED'
+                      and bv.compiler_version = 'nifi-native-contract-v2'
+                        ORDER BY
+                          o.id,
+                          target_platform,
+                          cv.version DESC
+                    """,
+                    (user_id,),
+                ).fetchall()
+            return res
 
     def get_latest_contract(self, operator_id: str, *, user_id: int = 1):
         with self.pool.connection() as conn:

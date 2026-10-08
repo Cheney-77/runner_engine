@@ -37,7 +37,6 @@ from .model import CreateVirtualContractRequest
 from .selection import selection_to_virtual_contract
 from .source_store import LocalSourceStore
 
-
 logger = logging.getLogger(__name__)
 
 
@@ -61,7 +60,7 @@ class PublishSettings:
     database_url: str
     build_service_url: str
     default_profile: str = "standard"
-    default_user_id: int = 1
+    default_user_id: str = "1"
     edge_python_version: str = "3.12"
     edge_uv_default_index: str | None = None
     edge_require_binary: bool = True
@@ -71,22 +70,22 @@ class PublishSettings:
 
 class PublishService:
     def __init__(
-        self,
-        settings: PublishSettings,
-        *,
-        store: Any | None = None,
-        source_store: LocalSourceStore | None = None,
-        build_client: BuildServiceClient | None = None,
-        edge_resolver: EdgeDependencyResolver | None = None,
+            self,
+            settings: PublishSettings,
+            *,
+            store: Any | None = None,
+            source_store: LocalSourceStore | None = None,
+            build_client: BuildServiceClient | None = None,
+            edge_resolver: EdgeDependencyResolver | None = None,
     ):
         self.settings = settings
 
         for path in (
-            settings.workspace_root,
-            settings.catalog_root,
-            settings.source_root,
-            settings.native_artifact_root,
-            settings.edge_bundle_root,
+                settings.workspace_root,
+                settings.catalog_root,
+                settings.source_root,
+                settings.native_artifact_root,
+                settings.edge_bundle_root,
         ):
             path.mkdir(parents=True, exist_ok=True)
 
@@ -229,10 +228,10 @@ class PublishService:
         )
         root = self.settings.edge_bundle_root.resolve()
         path = (
-            root
-            / f'user-{row["user_id"]}'
-            / target_key
-            / filename
+                root
+                / f'user-{row["user_id"]}'
+                / target_key
+                / filename
         ).resolve()
 
         try:
@@ -285,9 +284,9 @@ class PublishService:
         return result
 
     def _select_python_root(
-        self,
-        root: Path,
-        requested: str | None,
+            self,
+            root: Path,
+            requested: str | None,
     ) -> tuple[str, list[dict[str, Any]]]:
         candidates = self._python_root_candidates(root)
 
@@ -311,10 +310,10 @@ class PublishService:
 
     @staticmethod
     def _parameter_view(
-        parameter: ParameterInfo,
-        *,
-        index: int,
-        constructor: bool,
+            parameter: ParameterInfo,
+            *,
+            index: int,
+            constructor: bool,
     ) -> dict[str, Any]:
         return {
             "name": parameter.name,
@@ -384,10 +383,10 @@ class PublishService:
         }
 
     def analyze(
-        self,
-        workspace: str,
-        *,
-        python_root: str | None = None,
+            self,
+            workspace: str,
+            *,
+            python_root: str | None = None,
     ) -> dict[str, Any]:
         root = self._workspace(workspace)
         selected_root, candidates = self._select_python_root(root, python_root)
@@ -417,8 +416,8 @@ class PublishService:
         }
 
     def create_virtual_contract(
-        self,
-        selection: CreateVirtualContractRequest,
+            self,
+            selection: CreateVirtualContractRequest,
     ) -> dict[str, Any]:
         workspace = self._workspace(selection.workspace)
         mutable_catalog = scan_project(
@@ -517,6 +516,19 @@ class PublishService:
             ],
         }
 
+    def get_operator_list(self, run_type: str, user_id: str) -> dict[str, Any]:
+
+        if run_type not in ("runner", "edge"):
+            raise PublishError("run_type not defined")
+        if not user_id:
+            user_id = self.settings.default_user_id,
+        operator_list = self.store.get_operator_list(run_type, user_id)
+
+        if operator_list is None:
+            raise PublishError("operator not found")
+
+        return operator_list
+
     @staticmethod
     def _variant_view(row) -> dict[str, Any]:
         return {
@@ -555,10 +567,10 @@ class PublishService:
         return row, parent, plan, source_path
 
     def _compile_backend(
-        self,
-        operator_id: str,
-        backend: str,
-        options: dict[str, Any],
+            self,
+            operator_id: str,
+            backend: str,
+            options: dict[str, Any],
     ):
         row, parent, plan, source_path = self._load_current_parent(operator_id)
 
@@ -610,10 +622,10 @@ class PublishService:
         return variant, child, plan, source_path
 
     def compile_backend(
-        self,
-        operator_id: str,
-        backend: str,
-        options: dict[str, Any],
+            self,
+            operator_id: str,
+            backend: str,
+            options: dict[str, Any],
     ) -> dict[str, Any]:
         variant, child, _, _ = self._compile_backend(
             operator_id,
@@ -630,10 +642,10 @@ class PublishService:
         }
 
     def publish_backend(
-        self,
-        operator_id: str,
-        backend: str,
-        options: dict[str, Any],
+            self,
+            operator_id: str,
+            backend: str,
+            options: dict[str, Any],
     ) -> dict[str, Any]:
         variant, child, plan, source_path = self._compile_backend(
             operator_id,
@@ -697,10 +709,10 @@ class PublishService:
             raise
 
     def _publish_runner(
-        self,
-        child: RunnerBackendContract,
-        plan,
-        source_path: Path,
+            self,
+            child: RunnerBackendContract,
+            plan,
+            source_path: Path,
     ) -> tuple[dict[str, Any], str]:
         requirements = read_requirements(source_path)
         runtime = self.build_client.resolve(requirements)
@@ -725,7 +737,7 @@ class PublishService:
             )
 
         with tempfile.TemporaryDirectory(
-            prefix="mpr-runner-publish-"
+                prefix="mpr-runner-publish-"
         ) as temp:
             staging = Path(temp)
             shutil.copytree(source_path, staging / "runtime")
@@ -772,12 +784,12 @@ class PublishService:
         }
 
     def _dependency_conflict_detail(
-        self,
-        *,
-        operator_id: str,
-        child: NifiNativeBackendContract,
-        members: list[dict[str, Any]],
-        exc: EdgeDependencyResolutionError,
+            self,
+            *,
+            operator_id: str,
+            child: NifiNativeBackendContract,
+            members: list[dict[str, Any]],
+            exc: EdgeDependencyResolutionError,
     ) -> dict[str, Any]:
         return {
             "code": "EDGE_DEPENDENCY_CONFLICT",
@@ -809,13 +821,13 @@ class PublishService:
         }
 
     def _publish_native(
-        self,
-        operator_id: str,
-        job_id: str,
-        variant,
-        child: NifiNativeBackendContract,
-        plan,
-        source_path: Path,
+            self,
+            operator_id: str,
+            job_id: str,
+            variant,
+            child: NifiNativeBackendContract,
+            plan,
+            source_path: Path,
     ) -> tuple[dict[str, Any], str]:
         artifact = write_native_package(
             self.settings.native_artifact_root,
@@ -827,10 +839,10 @@ class PublishService:
         user_id = self.settings.default_user_id
 
         with self.store.edge_publish_lock(
-            user_id=user_id,
-            target_os=target.os,
-            target_arch=target.arch,
-            python_version=target.python_version,
+                user_id=user_id,
+                target_os=target.os,
+                target_arch=target.arch,
+                python_version=target.python_version,
         ) as edge_conn:
             current_rows = self.store.list_edge_deployments(
                 user_id=user_id,
@@ -852,7 +864,7 @@ class PublishService:
                 "requirements": list(child.requirements),
             }
             members.append(candidate)
-
+            print(len(members))
             all_requirements = [
                 requirement
                 for member in members
@@ -883,7 +895,7 @@ class PublishService:
             )
 
             try:
-                bundle_file, bundle_sha256, manifest = build_edge_bundle(
+                bundle_file, bundle_sha256, bundle_md5, manifest = build_edge_bundle(
                     self.settings.edge_bundle_root,
                     user_id=user_id,
                     target=target,
@@ -924,6 +936,7 @@ class PublishService:
                     "artifactFile": str(bundle_file),
                     "artifactRef": bundle_ref,
                     "artifactSha256": bundle_sha256,
+                    "artifactMd5": bundle_md5,
                     "dependencyLockSha256": resolution.lock_sha256,
                     "dependencyPackageCount": resolution.package_count,
                     "processorCount": len(members),

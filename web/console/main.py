@@ -95,12 +95,15 @@ class Unified:
             await self.publish(scope, receive, send)
             return
         path = scope.get("path", "")
+        print(path)
         if path in ("/observe", "/observe/"):
             await self.hub(scope, receive, send)
         elif path.startswith("/observe/"):
             await self.observe(scope, receive, send)
         elif path == "/admin":
             await self.hub(scope, receive, send)
+        elif path == "/admin/edge":
+            await self.publish(scope, receive, send)
         elif path.startswith("/admin/"):
             await self.admin(scope, receive, send)
         elif path == "/console" or path.startswith("/console/"):

@@ -26,6 +26,7 @@ class CompiledParameter(BaseModel):
     required: bool = False
     has_default: bool = False
     default: Any | None = None
+    parameter_type: str = "str"
 
 
 class ExecutionPlan(BaseModel):

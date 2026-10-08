@@ -60,6 +60,7 @@ def compile_runner_contract(
                 required=item.required,
                 has_default=item.has_default,
                 default=item.default,
+                parameter_type=item.parameter_type,
             )
             for item in plan.parameters
         ],

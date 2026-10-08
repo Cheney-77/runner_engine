@@ -52,7 +52,8 @@
 
   function choiceTitle(value) {
     const titles = {
-      bytes: "字节 / 文本（bytes）",
+      bytes: "原始字节（bytes）",
+      binary_stream: "二进制流（BytesIO）",
       json: "JSON（对象、列表等）",
       utf8: "UTF-8 文本",
       text: "文本",
@@ -176,6 +177,7 @@
         option.value = JSON.stringify(value);
         const friendly = {
           bytes: "原始字节（bytes）",
+          binary_stream: "二进制流（BytesIO）",
           json: "JSON（对象或数组）",
           utf8: "UTF-8 文本",
           text: "文本",

@@ -24,6 +24,7 @@ class Codec(StrEnum):
     BYTES = "bytes"
     TEXT = "text"
     JSON = "json"
+    BINARY_STREAM = "binary_stream"
 
 
 class NonePolicy(StrEnum):
@@ -114,6 +115,7 @@ class OperatorParameterSpec(BaseModel):
     required: bool = False
     has_default: bool = False
     default: Any | None = None
+    parameter_type: str = "str"
 
     @field_validator("key")
     @classmethod
@@ -130,6 +132,7 @@ class ArgumentBinding(BaseModel):
     metadata_key: str | None = None
     parameter: OperatorParameterSpec | None = None
     constant: Any | None = None
+    argument_type: str = "str"
 
     @model_validator(mode="after")
     def validate_payload(self) -> "ArgumentBinding":

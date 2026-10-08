@@ -13,12 +13,21 @@ from fastapi.responses import FileResponse
 
 from .lifecycle_routes import install_publish_lifecycle_routes
 from .lifecycle_service import LifecyclePublishService
-from .model import AnalyzeRequest, BackendRequest, CreateVirtualContractRequest
+from .model import AnalyzeRequest, BackendRequest, CreateVirtualContractRequest, MinioFolderDownloadRequest
 from .service import (
     EdgeDependencyConflictError,
     PublishError,
     PublishService,
     PublishSettings,
+)
+
+from .utils.minio_tools import (
+    MinioAccessDeniedError,
+    MinioBucketNotFoundError,
+    MinioConfigurationError,
+    MinioFolderNotFoundError,
+    MinioToolError,
+    download_minio_folder,
 )
 
 
@@ -87,23 +96,21 @@ def _service_from_env() -> LifecyclePublishService:
                 "PUBLISH_DEFAULT_PROFILE",
                 "standard",
             ),
-            default_user_id=int(
-                os.environ.get("PUBLISH_DEFAULT_USER_ID", "1")
-            ),
+            default_user_id=os.environ.get("PUBLISH_DEFAULT_USER_ID", "1"),
             edge_python_version=os.environ.get(
                 "PUBLISH_EDGE_PYTHON_VERSION",
                 "3.12",
             ),
             edge_uv_default_index=(
-                os.environ.get("PUBLISH_EDGE_UV_DEFAULT_INDEX")
-                or None
+                    os.environ.get("PUBLISH_EDGE_UV_DEFAULT_INDEX")
+                    or None
             ),
             edge_require_binary=(
-                os.environ.get(
-                    "PUBLISH_EDGE_REQUIRE_BINARY",
-                    "true",
-                ).lower()
-                not in {"0", "false", "no"}
+                    os.environ.get(
+                        "PUBLISH_EDGE_REQUIRE_BINARY",
+                        "true",
+                    ).lower()
+                    not in {"0", "false", "no"}
             ),
             build_timeout_seconds=int(
                 os.environ.get(
@@ -203,8 +210,8 @@ def create_app(service: PublishService | None = None) -> FastAPI:
 
     @application.post("/v1/operators")
     def create_operator(
-        payload: CreateVirtualContractRequest,
-        request: Request,
+            payload: CreateVirtualContractRequest,
+            request: Request,
     ) -> dict:
         try:
             return request.app.state.publish_service.create_virtual_contract(
@@ -227,10 +234,10 @@ def create_app(service: PublishService | None = None) -> FastAPI:
         "/v1/operators/{operator_id}/backends/{backend}/compile"
     )
     def compile_backend(
-        operator_id: str,
-        backend: str,
-        payload: BackendRequest,
-        request: Request,
+            operator_id: str,
+            backend: str,
+            payload: BackendRequest,
+            request: Request,
     ) -> dict:
         try:
             return request.app.state.publish_service.compile_backend(
@@ -250,10 +257,10 @@ def create_app(service: PublishService | None = None) -> FastAPI:
         "/v1/operators/{operator_id}/backends/{backend}/publish"
     )
     def publish_backend(
-        operator_id: str,
-        backend: str,
-        payload: BackendRequest,
-        request: Request,
+            operator_id: str,
+            backend: str,
+            payload: BackendRequest,
+            request: Request,
     ) -> dict:
         try:
             return request.app.state.publish_service.publish_backend(
@@ -268,6 +275,73 @@ def create_app(service: PublishService | None = None) -> FastAPI:
         except Exception:
             logger.exception("Backend publish failed")
             raise
+
+    @application.post("/v1/minio/download-folder")
+    def download_minio_folder_route(
+            payload: MinioFolderDownloadRequest,
+    ) -> dict:
+        workspace_root = os.environ.get("PUBLISH_WORKSPACE_ROOT", "", ).strip()
+
+        if not workspace_root:
+            raise HTTPException(status_code=500, detail="PUBLISH_WORKSPACE_ROOT is required")
+
+        try:
+            result = download_minio_folder(
+                bucket=payload.bucket,
+                folder_path=payload.folder_path,
+                workspace_root=Path(workspace_root),
+            )
+
+            logger.info(
+                "MinIO folder downloaded "
+                "bucket=%s prefix=%s workspace=%s "
+                "files=%s bytes=%s",
+                result.bucket,
+                result.folder_path,
+                result.local_path,
+                result.downloaded_files,
+                result.downloaded_bytes,
+            )
+
+            return {
+                "ok": True,
+                "data": result.to_dict(),
+            }
+
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+        except MinioBucketNotFoundError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+        except MinioFolderNotFoundError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+        except MinioAccessDeniedError as exc:
+            raise HTTPException(status_code=403, detail=str(exc)) from exc
+
+        except MinioConfigurationError as exc:
+            logger.exception("MinIO configuration error")
+
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+        except MinioToolError as exc:
+            logger.exception("MinIO folder download failed")
+
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+        except Exception:
+            logger.exception("Unexpected MinIO folder download failure")
+            raise
+
+    @application.get("/v1/operators")
+    def get_operator_list(run_type: str, user_id: str, request: Request):
+        try:
+            res = request.app.state.publish_service.get_operator_list(run_type, user_id)
+        except PublishError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+        return res
 
     install_publish_lifecycle_routes(application)
     return application

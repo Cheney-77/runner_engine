@@ -6,7 +6,7 @@ PUBLISH_SCHEMA_STATEMENTS = (
     """
     CREATE TABLE IF NOT EXISTS publish.operators (
         id UUID PRIMARY KEY,
-        user_id BIGINT NOT NULL DEFAULT 1,
+        user_id TEXT NOT NULL DEFAULT '1',
         workspace TEXT NOT NULL,
         name TEXT NOT NULL,
         display_name TEXT NOT NULL,
@@ -17,7 +17,7 @@ PUBLISH_SCHEMA_STATEMENTS = (
     """,
     """
     ALTER TABLE publish.operators
-    ADD COLUMN IF NOT EXISTS user_id BIGINT NOT NULL DEFAULT 1
+    ADD COLUMN IF NOT EXISTS user_id TEXT NOT NULL DEFAULT '1'
     """,
     """
     ALTER TABLE publish.operators
@@ -92,7 +92,7 @@ PUBLISH_SCHEMA_STATEMENTS = (
     """
     CREATE TABLE IF NOT EXISTS publish.edge_native_deployments (
         id UUID PRIMARY KEY,
-        user_id BIGINT NOT NULL,
+        user_id TEXT NOT NULL DEFAULT '1',
         operator_id UUID NOT NULL REFERENCES publish.operators(id),
         variant_id UUID NOT NULL REFERENCES publish.backend_variants(id),
         target_os TEXT NOT NULL CHECK (target_os IN ('linux', 'windows')),
@@ -114,7 +114,7 @@ PUBLISH_SCHEMA_STATEMENTS = (
     """
     CREATE TABLE IF NOT EXISTS publish.edge_dependency_bundles (
         id UUID PRIMARY KEY,
-        user_id BIGINT NOT NULL,
+        user_id TEXT NOT NULL,
         target_os TEXT NOT NULL CHECK (target_os IN ('linux', 'windows')),
         target_arch TEXT NOT NULL CHECK (target_arch IN ('x86_64', 'aarch64')),
         python_version TEXT NOT NULL,

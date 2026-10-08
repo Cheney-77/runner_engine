@@ -21,6 +21,27 @@ def _sha256_file(path: Path) -> str:
             digest.update(chunk)
     return digest.hexdigest()
 
+def _md5_file(file_path: Path) -> str:
+    md5_hash = hashlib.md5()
+
+    with file_path.open("rb") as f:
+        for chunk in iter(lambda: f.read(8192), b""):
+            md5_hash.update(chunk)
+
+    return md5_hash.hexdigest()
+
+
+def _file_hashes(path: Path) -> tuple[str, str]:
+    sha256_digest = hashlib.sha256()
+    md5_digest = hashlib.md5()
+
+    with path.open("rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            sha256_digest.update(chunk)
+            md5_digest.update(chunk)
+
+    return sha256_digest.hexdigest(), md5_digest.hexdigest()
+
 
 def build_edge_bundle(
     output_root: Path,
@@ -31,7 +52,7 @@ def build_edge_bundle(
     members: list[dict[str, Any]],
     resolution: EdgeDependencyResolution,
     resolver: EdgeDependencyResolver,
-) -> tuple[Path, str, dict[str, Any]]:
+) -> tuple[Path, str, str, dict[str, Any]]:
     output_root.mkdir(parents=True, exist_ok=True)
 
     target_key = f"{target.os}-{target.arch}-py{target.python_version}"
@@ -106,5 +127,5 @@ def build_edge_bundle(
             for path in sorted(staging.rglob("*")):
                 if path.is_file():
                     archive.write(path, path.relative_to(staging.parent).as_posix())
-
-    return final_zip, _sha256_file(final_zip), manifest
+    sha256, md5 = _file_hashes(final_zip)
+    return final_zip, sha256, md5, manifest

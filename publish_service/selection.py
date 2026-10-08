@@ -18,6 +18,7 @@ def _binding(value: BindingSelection) -> ArgumentBinding:
             required=value.parameter_required,
             has_default=value.parameter_has_default,
             default=value.parameter_default,
+            parameter_type=value.parameter_type
         )
 
     return ArgumentBinding(
@@ -26,6 +27,7 @@ def _binding(value: BindingSelection) -> ArgumentBinding:
         metadata_key=value.metadata_key,
         parameter=parameter,
         constant=value.constant,
+        argument_type=value.parameter_type
     )
 
 

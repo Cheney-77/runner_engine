@@ -58,6 +58,17 @@ def _decode(raw, codec):
         if isinstance(raw, str):
             return json.loads(raw)
         return raw
+    if codec == "binary_stream":
+        if isinstance(raw, io.BytesIO):
+            return raw
+
+        if isinstance(raw, (bytes, bytearray, memoryview)):
+            return io.BytesIO(bytes(raw))
+
+        raise TypeError(
+            "binary_stream codec requires bytes-like input, "
+            f"got {type(raw).__name__}"
+        )
     raise ValueError(f"unsupported codec: {codec}")
 
 
@@ -130,6 +141,25 @@ def _output_value(result, spec):
         return spec.get("value")
     raise ValueError(f"unsupported output source: {source}")
 
+def _json_default(value):
+    tolist = getattr(value, "tolist", None)
+    if callable(tolist):
+        converted = tolist()
+
+        if converted is not value:
+            return converted
+
+    item = getattr(value, "item", None)
+    if callable(item):
+        converted = item()
+
+        if converted is not value:
+            return converted
+
+    raise TypeError(
+        f"Object of type {type(value).__name__} "
+        "is not JSON serializable"
+    )
 
 def _encode_payload(value, codec):
     if codec == "bytes":
@@ -143,7 +173,7 @@ def _encode_payload(value, codec):
     if codec == "text":
         return str(value).encode("utf-8")
     if codec == "json":
-        return json.dumps(value, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+        return json.dumps(value, ensure_ascii=False, separators=(",", ":"), default=_json_default, allow_nan=False,).encode("utf-8")
     raise ValueError(f"unsupported output codec: {codec}")
 
 

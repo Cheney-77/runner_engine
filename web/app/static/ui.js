@@ -792,7 +792,11 @@ function collectBindings(records, label) {
     if (!plain(selection)) {
       throw new Error(`${label}「${name}」的 BindingSelection 必须是 JSON object`);
     }
-    collected[name] = selection;
+    // collected[name] = selection;
+    collected[name] = {
+      ...selection,
+      parameterType: entry.param.annotation,
+    };
   }
   return collected;
 }
