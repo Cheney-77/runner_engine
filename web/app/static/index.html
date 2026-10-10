@@ -6,10 +6,12 @@
   <meta name="theme-color" content="#ffffff">
   <title>创建算子 · Managed Python</title>
   <link rel="stylesheet" href="/static/styles.css">
+  <link rel="stylesheet" href="/static/edge-identity.css">
   <script defer src="/static/schema.js"></script>
   <script defer src="/static/form.js"></script>
   <script defer src="/static/binding.js"></script>
   <script defer src="/static/ui.js"></script>
+  <script defer src="/static/edge-target.js"></script>
 </head>
 <body>
   <div id="globalProgress" class="global-progress hidden" aria-hidden="true"><span></span></div>
@@ -34,7 +36,6 @@
       </div>
     </div>
   </header>
-
   <nav class="journey" aria-label="算子创建步骤">
     <div class="journey-inner">
       <ol class="step-nav" id="stepNav">
@@ -46,7 +47,6 @@
       </ol>
     </div>
   </nav>
-
   <main class="main" id="mainContent">
     <div id="contextStrip" class="context-strip hidden" aria-label="当前项目上下文">
       <span class="context-item"><span class="context-caption">工作区</span><strong id="contextWorkspace">—</strong></span>
@@ -59,7 +59,6 @@
       <span id="noticeText"></span>
       <button id="dismissNotice" class="icon-button" type="button" aria-label="关闭提示">×</button>
     </div>
-
     <!-- 01 Workspace -->
     <section class="step-page" id="step0" aria-labelledby="workspaceTitle">
       <div class="page-heading">
@@ -123,7 +122,6 @@
         <div class="panel-actions"><button id="toCallablesBtn" class="button primary" type="button">选择调用入口 <span class="arrow" aria-hidden="true">→</span></button></div>
       </div>
     </section>
-
     <!-- 02 Callable -->
     <section class="step-page hidden" id="step1" aria-labelledby="callableTitle">
       <div class="page-heading">
@@ -151,7 +149,6 @@
         <button id="toBindingsBtn" class="button primary" type="button">配置契约 <span class="arrow" aria-hidden="true">→</span></button>
       </div>
     </section>
-
     <!-- 03 Contract -->
     <section class="step-page hidden" id="step2" aria-labelledby="contractTitle">
       <div class="page-heading">
@@ -225,7 +222,6 @@
         <button id="reviewBtn" class="button primary" type="button">查看契约摘要 <span class="arrow" aria-hidden="true">→</span></button>
       </div>
     </section>
-
     <!-- 04 Review -->
     <section class="step-page hidden" id="step3" aria-labelledby="reviewTitle">
       <div class="page-heading">
@@ -269,7 +265,6 @@
         <button id="createBtn" class="button primary" type="button" disabled>创建算子 <span class="arrow" aria-hidden="true">→</span></button>
       </div>
     </section>
-
     <!-- 05 Release -->
     <section class="step-page hidden" id="step4" aria-labelledby="publishTitle">
       <div class="page-heading">
@@ -346,7 +341,6 @@
     </section>
     <footer class="footer">Managed Python · Operator Console</footer>
   </main>
-
   <dialog id="publishDialog" class="publish-dialog" aria-labelledby="publishDialogTitle" aria-describedby="publishDialogDescription">
     <div class="modal-symbol" aria-hidden="true">↑</div>
     <h2 id="publishDialogTitle">确认发布算子？</h2>

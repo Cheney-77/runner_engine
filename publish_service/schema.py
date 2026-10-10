@@ -6,7 +6,7 @@ PUBLISH_SCHEMA_STATEMENTS = (
     """
     CREATE TABLE IF NOT EXISTS publish.operators (
         id UUID PRIMARY KEY,
-        user_id TEXT NOT NULL DEFAULT '1',
+        user_id TEXT NOT NULL,
         workspace TEXT NOT NULL,
         name TEXT NOT NULL,
         display_name TEXT NOT NULL,
@@ -17,7 +17,15 @@ PUBLISH_SCHEMA_STATEMENTS = (
     """,
     """
     ALTER TABLE publish.operators
-    ADD COLUMN IF NOT EXISTS user_id TEXT NOT NULL DEFAULT '1'
+    ADD COLUMN IF NOT EXISTS user_id TEXT
+    """,
+    """
+    ALTER TABLE publish.operators
+    ALTER COLUMN user_id DROP DEFAULT
+    """,
+    """
+    ALTER TABLE publish.operators
+    ALTER COLUMN user_id SET NOT NULL
     """,
     """
     ALTER TABLE publish.operators
@@ -92,24 +100,34 @@ PUBLISH_SCHEMA_STATEMENTS = (
     """
     CREATE TABLE IF NOT EXISTS publish.edge_native_deployments (
         id UUID PRIMARY KEY,
-        user_id TEXT NOT NULL DEFAULT '1',
+        user_id TEXT NOT NULL,
         operator_id UUID NOT NULL REFERENCES publish.operators(id),
         variant_id UUID NOT NULL REFERENCES publish.backend_variants(id),
         target_os TEXT NOT NULL CHECK (target_os IN ('linux', 'windows')),
         target_arch TEXT NOT NULL CHECK (target_arch IN ('x86_64', 'aarch64')),
         python_version TEXT NOT NULL,
+        token_pair TEXT,
+        edge_name TEXT,
         uv_python_platform TEXT NOT NULL,
         package_name TEXT NOT NULL,
         artifact_file TEXT NOT NULL,
         requirements_json JSONB NOT NULL CHECK (jsonb_typeof(requirements_json) = 'array'),
         created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
         updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-        UNIQUE(user_id, operator_id, target_os, target_arch, python_version)
+        CONSTRAINT edge_native_device_pair_check CHECK (
+            (token_pair IS NULL AND edge_name IS NULL) OR
+            (token_pair IS NOT NULL AND edge_name IS NOT NULL AND btrim(token_pair) <> '' AND btrim(edge_name) <> '')
+        ),
+        UNIQUE(user_id, operator_id, target_os, target_arch, python_version, token_pair, edge_name)
     )
     """,
     """
+    ALTER TABLE publish.edge_native_deployments
+    ALTER COLUMN user_id DROP DEFAULT
+    """,
+    """
     CREATE INDEX IF NOT EXISTS ix_publish_edge_native_target
-    ON publish.edge_native_deployments(user_id, target_os, target_arch, python_version)
+    ON publish.edge_native_deployments(user_id, target_os, target_arch, python_version, token_pair, edge_name)
     """,
     """
     CREATE TABLE IF NOT EXISTS publish.edge_dependency_bundles (
@@ -118,6 +136,8 @@ PUBLISH_SCHEMA_STATEMENTS = (
         target_os TEXT NOT NULL CHECK (target_os IN ('linux', 'windows')),
         target_arch TEXT NOT NULL CHECK (target_arch IN ('x86_64', 'aarch64')),
         python_version TEXT NOT NULL,
+        token_pair TEXT,
+        edge_name TEXT,
         uv_python_platform TEXT NOT NULL,
         revision INTEGER NOT NULL CHECK (revision > 0),
         requirements_json JSONB NOT NULL CHECK (jsonb_typeof(requirements_json) = 'array'),
@@ -127,13 +147,17 @@ PUBLISH_SCHEMA_STATEMENTS = (
         artifact_sha256 VARCHAR(64) NOT NULL,
         manifest_json JSONB NOT NULL CHECK (jsonb_typeof(manifest_json) = 'object'),
         created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-        UNIQUE(user_id, target_os, target_arch, python_version, revision)
+        CONSTRAINT edge_bundle_device_pair_check CHECK (
+            (token_pair IS NULL AND edge_name IS NULL) OR
+            (token_pair IS NOT NULL AND edge_name IS NOT NULL AND btrim(token_pair) <> '' AND btrim(edge_name) <> '')
+        ),
+        UNIQUE(user_id, target_os, target_arch, python_version, token_pair, edge_name, revision)
     )
     """,
     """
     CREATE INDEX IF NOT EXISTS ix_publish_edge_bundle_target_revision
     ON publish.edge_dependency_bundles(
-        user_id, target_os, target_arch, python_version, revision DESC
+        user_id, target_os, target_arch, python_version, token_pair, edge_name, revision DESC
     )
     """,
     """

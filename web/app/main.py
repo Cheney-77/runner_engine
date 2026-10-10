@@ -10,6 +10,7 @@ from fastapi.responses import FileResponse, HTMLResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from .gateway import NO_BODY, PublishGateway, segment
+from .progress_proxy import install_publish_progress_proxy
 
 
 STATIC = Path(__file__).resolve().parent / "static"
@@ -177,7 +178,22 @@ async def publish_backend(operator_id: str, backend: str, request: Request):
 
 def _index_html() -> str:
     html = (STATIC / "index.html").read_text(encoding="utf-8")
+    progress_style = '<link rel="stylesheet" href="/static/publish-progress.css">'
+    progress_script = '<script defer src="/static/publish-progress.js"></script>'
     script = '<script defer src="/static/edge.js"></script>'
+
+    if progress_style not in html:
+        html = html.replace(
+            "</head>",
+            f"  {progress_style}\n</head>",
+            1,
+        )
+    if progress_script not in html:
+        html = html.replace(
+            "</body>",
+            f"  {progress_script}\n</body>",
+            1,
+        )
 
     if script not in html:
         html = html.replace("</body>", f"  {script}\n</body>", 1)
@@ -199,7 +215,7 @@ async def edge_admin():
 async def edge_ops():
     return FileResponse(STATIC / "edge-ops.html")
 
-
+install_publish_progress_proxy(app)
 app.mount("/static", StaticFiles(directory=STATIC), name="static")
 
 

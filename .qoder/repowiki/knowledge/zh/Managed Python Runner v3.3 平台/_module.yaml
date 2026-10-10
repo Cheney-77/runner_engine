@@ -1,0 +1,10 @@
+schema_version: 1
+module_path: ""
+title: Managed Python Runner v3.3 平台
+scope:
+    - pyproject.toml
+    - requirements.lock
+    - .gitignore
+source_files: []
+depends_on: []
+related_to: []

@@ -1,0 +1,11 @@
+schema_version: 1
+module_path: publish_service
+title: Managed Python Operator 发布服务
+scope:
+    - publish_service/
+source_files: []
+depends_on: []
+related_to:
+    - path: operator_authoring
+    - path: runner_engine/core_runtime/publisher_gateway
+    - path: web

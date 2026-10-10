@@ -1,0 +1,10 @@
+schema_version: 1
+module_path: nifi_integration
+title: NiFi Managed Python Runner 适配器
+scope:
+    - nifi/
+    - proto/
+source_files: []
+depends_on: []
+related_to:
+    - path: runner_engine/core_runtime/publisher_gateway

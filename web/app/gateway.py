@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from typing import Any
 from urllib.parse import quote
@@ -52,6 +53,14 @@ class PublishGateway:
         # Dependency injection for tests; production uses real network transport.
         self.transport = transport
 
+    def _headers(self, accept: str) -> dict[str, str]:
+        headers = {"Accept": accept}
+        if self.settings.bearer_token:
+            headers["Authorization"] = (
+                f"Bearer {self.settings.bearer_token}"
+            )
+        return headers
+
     async def request(
         self,
         method: str,
@@ -67,10 +76,6 @@ class PublishGateway:
         if body is not NO_BODY:
             kwargs["json"] = body
 
-        headers = {"Accept": "application/json"}
-        if self.settings.bearer_token:
-            headers["Authorization"] = f"Bearer {self.settings.bearer_token}"
-
         timeout = (
             self.settings.long_timeout
             if long_running
@@ -85,6 +90,40 @@ class PublishGateway:
             return await client.request(
                 method,
                 self.settings.publish_url + path,
-                headers=headers,
+                headers=self._headers("application/json"),
                 **kwargs,
             )
+
+    @asynccontextmanager
+    async def stream(
+        self,
+        method: str,
+        path: str,
+        *,
+        accept: str = "text/event-stream",
+    ):
+        if not path.startswith("/") or path.startswith("//"):
+            raise ValueError("Invalid upstream route")
+
+        client = httpx.AsyncClient(
+            timeout=httpx.Timeout(None, connect=10.0),
+            follow_redirects=False,
+            trust_env=False,
+            transport=self.transport,
+        )
+        response = None
+        try:
+            upstream_request = client.build_request(
+                method,
+                self.settings.publish_url + path,
+                headers=self._headers(accept),
+            )
+            response = await client.send(
+                upstream_request,
+                stream=True,
+            )
+            yield response
+        finally:
+            if response is not None:
+                await response.aclose()
+            await client.aclose()

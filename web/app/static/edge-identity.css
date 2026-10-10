@@ -1,0 +1,49 @@
+/* Device scope is explicit in Edge Admin and Operations; existing layout stays unchanged. */
+.edge-machine-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 12px;
+  padding: 15px 18px;
+  margin-bottom: 18px;
+  border: 1px solid var(--border-light);
+  border-radius: 12px;
+  background: #fff;
+}
+.edge-machine-filters label {
+  display: grid;
+  gap: 5px;
+  flex: 1 1 200px;
+  color: var(--muted);
+  font-size: 12px;
+}
+.edge-machine-filters input {
+  width: 100%;
+  min-width: 0;
+  padding: 9px 11px;
+  border: 1px solid var(--border-light);
+  border-radius: 8px;
+  background: #fff;
+  color: var(--ink);
+  font: inherit;
+}
+.edge-machine-filters input:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
+.edge-machine-filters .button { align-self: end; }
+.edge-identity-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 18px;
+  margin-top: 6px;
+  color: var(--muted);
+  font-size: 12px;
+}
+.edge-identity-meta code, .edge-table td code { overflow-wrap: anywhere; word-break: break-word; }
+.edge-env-heading { min-width: 0; }
+.edge-env-card > header { align-items: flex-start; }
+.edge-env-card .edge-status { margin-top: 2px; }
+.edge-table td { overflow-wrap: anywhere; }
+@media (max-width: 520px) {
+  .edge-machine-filters { padding: 12px; }
+  .edge-machine-filters label { flex-basis: 100%; }
+  .edge-console .edge-status { white-space: nowrap; }
+}

@@ -1,0 +1,9 @@
+schema_version: 1
+module_path: operator_authoring
+title: 虚拟算子作者工具链（AST 扫描、契约编译与快照）
+scope:
+    - operator_authoring/
+source_files: []
+depends_on: []
+related_to:
+    - path: publish_service

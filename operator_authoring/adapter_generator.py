@@ -11,6 +11,7 @@ import importlib
 import json
 import os
 import sys
+import io
 from pathlib import Path
 
 _MISSING = object()
@@ -163,13 +164,14 @@ def _json_default(value):
 
 def _encode_payload(value, codec):
     if codec == "bytes":
-        if isinstance(value, bytes):
-            return value
-        if isinstance(value, bytearray):
-            return bytes(value)
+        if isinstance(value, (bytes, bytearray, memoryview)):
+        return bytes(value)
         if isinstance(value, str):
             return value.encode("utf-8")
-        raise TypeError("bytes output codec expects bytes, bytearray or str")
+        raise TypeError(
+            f"output.payload codec='bytes' expects bytes-like or str, "
+            f"got {type(value).__name__}; use codec='json' for dict/list"
+        )
     if codec == "text":
         return str(value).encode("utf-8")
     if codec == "json":

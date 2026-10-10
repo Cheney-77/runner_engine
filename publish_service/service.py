@@ -5,6 +5,7 @@ import logging
 import shutil
 import tempfile
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -31,9 +32,11 @@ from .backends.runner import (
     write_runner_release_files,
 )
 from .build_client import BuildServiceClient
-from .edge_bundle import build_edge_bundle
+from .edge_bundle import _file_hashes, build_edge_bundle
 from .edge_dependencies import EdgeDependencyResolutionError, EdgeDependencyResolver
+from .edge_identity import edge_directory_name
 from .model import CreateVirtualContractRequest
+from .progress import PublishProgressReporter
 from .selection import selection_to_virtual_contract
 from .source_store import LocalSourceStore
 
@@ -60,12 +63,16 @@ class PublishSettings:
     database_url: str
     build_service_url: str
     default_profile: str = "standard"
-    default_user_id: str = "1"
+    # default_user_id: str = "1"
     edge_python_version: str = "3.12"
     edge_uv_default_index: str | None = None
     edge_require_binary: bool = True
     build_timeout_seconds: int = 1800
+    publish_worker_threads: int = 4
     max_source_bytes: int = 500 * 1024 * 1024
+    auth_mode: str = "required"
+    demo_user_id: str | None = None
+    jwt_secret: str | None = None
 
 
 class PublishService:
@@ -108,9 +115,56 @@ class PublishService:
             require_binary=settings.edge_require_binary,
         )
         self.publisher = OperatorPublisher(Catalog(settings.catalog_root))
+        self._publish_executor = ThreadPoolExecutor(
+            max_workers=max(1, settings.publish_worker_threads),
+            thread_name_prefix="publish-job",
+        )
 
     def close(self) -> None:
+        # Do not close the DB pool while accepted publish jobs are still using it.
+        # FastAPI lifespan calls close() during graceful shutdown.
+        self._publish_executor.shutdown(
+            wait=True,
+            cancel_futures=False,
+        )
         self.store.close()
+
+    def get_publish_job(
+            self,
+            job_id: str,
+            *,
+            user_id: str,
+    ) -> dict[str, Any]:
+        row = self.store.get_publish_job(job_id, user_id=user_id)
+        if row is None:
+            raise PublishError("publish job not found")
+
+        result_json = row.get("result_json")
+        progress = None
+        result = None
+
+        if isinstance(result_json, dict):
+            if row["status"] in {"PENDING", "RUNNING"}:
+                candidate = result_json.get("_progress")
+                if isinstance(candidate, dict):
+                    progress = candidate
+            elif row["status"] == "READY":
+                result = result_json
+
+        return {
+            "jobId": str(row["id"]),
+            "status": row["status"],
+            "backend": row["backend"],
+            "variantId": str(row["backend_variant_id"]),
+            "operatorId": str(row["operator_id"]),
+            "artifactRef": row["artifact_ref"],
+            "progress": progress,
+            "result": result,
+            "error": row["error_message"],
+            "createdAt": row["created_at"],
+            "startedAt": row["started_at"],
+            "finishedAt": row["finished_at"],
+        }
 
     def edge_platforms(self) -> dict[str, Any]:
         return {
@@ -118,13 +172,10 @@ class PublishService:
             "platforms": supported_native_targets(self.settings.edge_python_version),
         }
 
-    def edge_deployments(self) -> dict[str, Any]:
-        rows = self.store.list_edge_deployments_for_user(
-            user_id=self.settings.default_user_id
-        )
-
+    def edge_deployments(self, *, user_id: str) -> dict[str, Any]:
+        rows = self.store.list_edge_deployments_for_user(user_id=user_id)
         return {
-            "userId": self.settings.default_user_id,
+            "userId": user_id,
             "deployments": [
                 {
                     "operatorId": str(row["operator_id"]),
@@ -133,6 +184,9 @@ class PublishService:
                     "name": row["name"],
                     "displayName": row["display_name"],
                     "packageName": row["package_name"],
+                    "edgeIdentity": {
+                        "tokenPair": row["token_pair"], "edgeName": row["edge_name"]
+                    },
                     "requirements": list(row["requirements_json"]),
                     "targetPlatform": {
                         "os": row["target_os"],
@@ -147,18 +201,17 @@ class PublishService:
             ],
         }
 
-    def edge_bundles(self, *, limit: int = 50) -> dict[str, Any]:
-        rows = self.store.list_edge_bundles(
-            user_id=self.settings.default_user_id,
-            limit=limit,
-        )
-
+    def edge_bundles(self, *, user_id: str, limit: int = 50) -> dict[str, Any]:
+        rows = self.store.list_edge_bundles(user_id=user_id, limit=limit)
         return {
-            "userId": self.settings.default_user_id,
+            "userId": user_id,
             "bundles": [
                 {
                     "bundleId": str(row["id"]),
                     "revision": row["revision"],
+                    "edgeIdentity": {
+                        "tokenPair": row["token_pair"], "edgeName": row["edge_name"]
+                    },
                     "targetPlatform": {
                         "os": row["target_os"],
                         "arch": row["target_arch"],
@@ -176,14 +229,10 @@ class PublishService:
             ],
         }
 
-    def edge_operations(self, *, limit: int = 100) -> dict[str, Any]:
-        rows = self.store.list_edge_operations(
-            user_id=self.settings.default_user_id,
-            limit=limit,
-        )
-
+    def edge_operations(self, *, user_id: str, limit: int = 100) -> dict[str, Any]:
+        rows = self.store.list_edge_operations(user_id=user_id, limit=limit)
         return {
-            "userId": self.settings.default_user_id,
+            "userId": user_id,
             "operations": [
                 {
                     "jobId": str(row["job_id"]),
@@ -195,6 +244,7 @@ class PublishService:
                     "name": row["name"],
                     "displayName": row["display_name"],
                     "options": row["options_json"],
+                    "edgeIdentity": row["options_json"].get("edgeIdentity"),
                     "artifactRef": row["artifact_ref"],
                     "publishedMetadata": row["published_metadata"],
                     "errorMessage": row["error_message"],
@@ -206,14 +256,14 @@ class PublishService:
             ],
         }
 
-    def edge_bundle_file(self, bundle_id: str) -> Path:
-        row = self.store.get_edge_bundle(
-            user_id=self.settings.default_user_id,
-            bundle_id=bundle_id,
-        )
+    def edge_bundle_file(self, bundle_id: str, *, user_id: str) -> Path:
+        row = self.store.get_edge_bundle(user_id=user_id, bundle_id=bundle_id)
         if row is None:
             raise PublishError("edge bundle not found")
+        return self._edge_bundle_path_from_row(row)
 
+    def _edge_bundle_path_from_row(self, row) -> Path:
+        """Resolve a persisted Bundle without opening another DB connection."""
         prefix = "edge-native-bundle:"
         artifact_ref = str(row["artifact_ref"])
         if not artifact_ref.startswith(prefix):
@@ -227,13 +277,10 @@ class PublishService:
             f'{row["target_os"]}-{row["target_arch"]}-py{row["python_version"]}'
         )
         root = self.settings.edge_bundle_root.resolve()
-        path = (
-                root
-                / f'user-{row["user_id"]}'
-                / target_key
-                / filename
-        ).resolve()
-
+        target_root = root / f'user-{row["user_id"]}' / target_key
+        if row["token_pair"] is not None and row["edge_name"] is not None:
+            target_root /= edge_directory_name(row["token_pair"], row["edge_name"])
+        path = (target_root / filename).resolve()
         try:
             path.relative_to(root)
         except ValueError as exc:
@@ -418,6 +465,8 @@ class PublishService:
     def create_virtual_contract(
             self,
             selection: CreateVirtualContractRequest,
+            *,
+            user_id: str,
     ) -> dict[str, Any]:
         workspace = self._workspace(selection.workspace)
         mutable_catalog = scan_project(
@@ -449,16 +498,18 @@ class PublishService:
             source_ref=source_ref,
         )
         plan = compile_virtual_contract(parent, immutable_catalog)
+        print("*****"*50)
+        print(plan.model_dump_json())
 
         operator, contract_row, created = self.store.save_virtual_contract(
             selection.workspace,
             parent,
-            user_id=self.settings.default_user_id,
+            user_id=user_id,
         )
 
         return {
             "created": created,
-            "userId": self.settings.default_user_id,
+            "userId": user_id,
             "operatorId": str(operator["id"]),
             "contractId": str(contract_row["id"]),
             "contractVersion": contract_row["version"],
@@ -476,20 +527,13 @@ class PublishService:
             },
         }
 
-    def get_operator(self, operator_id: str) -> dict[str, Any]:
-        operator = self.store.get_operator(
-            operator_id,
-            user_id=self.settings.default_user_id,
-        )
+    def get_operator(self, operator_id: str, *, user_id: str) -> dict[str, Any]:
+        operator = self.store.get_operator(operator_id, user_id=user_id)
 
         if operator is None:
             raise PublishError("operator not found")
 
-        contract = self.store.get_latest_contract(
-            operator_id,
-            user_id=self.settings.default_user_id,
-        )
-
+        contract = self.store.get_latest_contract(operator_id, user_id=user_id)
         if contract is None:
             raise PublishError("operator has no contract versions")
 
@@ -521,7 +565,7 @@ class PublishService:
         if run_type not in ("runner", "edge"):
             raise PublishError("run_type not defined")
         if not user_id:
-            user_id = self.settings.default_user_id,
+            raise PublishError("authenticated user_id is required")
         operator_list = self.store.get_operator_list(run_type, user_id)
 
         if operator_list is None:
@@ -543,11 +587,8 @@ class PublishService:
             "backendContract": row["backend_contract_json"],
         }
 
-    def _load_current_parent(self, operator_id: str):
-        row = self.store.get_latest_contract(
-            operator_id,
-            user_id=self.settings.default_user_id,
-        )
+    def _load_current_parent(self, operator_id: str, *, user_id: str):
+        row = self.store.get_latest_contract(operator_id, user_id=user_id)
 
         if row is None:
             raise PublishError("operator or contract not found")
@@ -571,9 +612,10 @@ class PublishService:
             operator_id: str,
             backend: str,
             options: dict[str, Any],
+            *,
+            user_id: str,
     ):
-        row, parent, plan, source_path = self._load_current_parent(operator_id)
-
+        row, parent, plan, source_path = self._load_current_parent(operator_id, user_id=user_id)
         if backend == "runner":
             normalized_options = {
                 "profile": str(
@@ -626,11 +668,14 @@ class PublishService:
             operator_id: str,
             backend: str,
             options: dict[str, Any],
+            *,
+            user_id: str,
     ) -> dict[str, Any]:
         variant, child, _, _ = self._compile_backend(
             operator_id,
             backend,
             options,
+            user_id=user_id,
         )
 
         return {
@@ -646,47 +691,104 @@ class PublishService:
             operator_id: str,
             backend: str,
             options: dict[str, Any],
+            *,
+            user_id: str,
     ) -> dict[str, Any]:
         variant, child, plan, source_path = self._compile_backend(
             operator_id,
             backend,
             options,
+            user_id=user_id,
         )
         job = self.store.create_publish_job(variant["id"])
-        self.store.mark_job_running(job["id"])
+        reporter = PublishProgressReporter(
+            self.store,
+            str(job["id"]),
+            backend,
+        )
+        reporter.emit(
+            "QUEUED",
+            "发布任务已创建，等待后台 Worker 执行",
+            status="PENDING",
+        )
 
         try:
+            self._publish_executor.submit(
+                self._execute_publish_job,
+                operator_id,
+                backend,
+                job,
+                variant,
+                child,
+                plan,
+                source_path,
+                user_id,
+                options.get("forceRebuild") is True,
+                reporter,
+            )
+        except Exception as exc:
+            self.store.mark_job_failed(
+                job["id"],
+                variant["id"],
+                f"{type(exc).__name__}: {exc}",
+            )
+            raise
+
+        return {
+            "jobId": str(job["id"]),
+            "status": "PENDING",
+            "backend": backend,
+            "statusUrl": f"/v1/publish-jobs/{job['id']}",
+            "eventsUrl": f"/v1/publish-jobs/{job['id']}/events",
+        }
+
+    def _execute_publish_job(
+            self,
+            operator_id: str,
+            backend: str,
+            job,
+            variant,
+            child,
+            plan,
+            source_path: Path,
+            user_id: str,
+            force_rebuild: bool,
+            progress: PublishProgressReporter,
+    ) -> None:
+        try:
+            self.store.mark_job_running(job["id"])
+            progress.start_heartbeat()
+            progress.emit(
+                "PREPARING",
+                "后台 Worker 已开始执行发布任务",
+            )
+
             if backend == "runner":
-                result, artifact_ref = self._publish_runner(
+                self._publish_runner_job(
                     child,
                     plan,
                     source_path,
-                )
-                self.store.mark_job_ready(
-                    job["id"],
-                    variant["id"],
-                    artifact_ref=artifact_ref,
-                    result=result,
+                    job_id=str(job["id"]),
+                    variant_id=str(variant["id"]),
+                    progress=progress,
                 )
             elif backend == "nifi_native":
-                result, artifact_ref = self._publish_native(
+                # Native keeps its existing transactional READY behavior:
+                # - bundle reuse -> mark_job_ready(..., conn=edge_conn)
+                # - new bundle -> commit_edge_publish(..., conn=edge_conn)
+                self._publish_native(
                     operator_id,
                     job["id"],
                     variant,
                     child,
                     plan,
                     source_path,
+                    user_id=user_id,
+                    force_rebuild=force_rebuild,
+                    progress=progress,
                 )
             else:
                 raise PublishError(f"unsupported backend: {backend}")
-
-            return {
-                "jobId": str(job["id"]),
-                "status": "READY",
-                "backend": backend,
-                "artifactRef": artifact_ref,
-                "result": result,
-            }
 
         except EdgeDependencyConflictError as exc:
             self.store.mark_job_failed(
@@ -698,7 +800,11 @@ class PublishService:
                     separators=(",", ":"),
                 ),
             )
-            raise
+            logger.warning(
+                "Publish job failed with dependency conflict: job_id=%s backend=%s",
+                job["id"],
+                backend,
+            )
 
         except Exception as exc:
             self.store.mark_job_failed(
@@ -706,16 +812,64 @@ class PublishService:
                 variant["id"],
                 f"{type(exc).__name__}: {exc}",
             )
-            raise
+            logger.exception(
+                "Publish job failed: job_id=%s backend=%s",
+                job["id"],
+                backend,
+            )
+        finally:
+            progress.stop_heartbeat()
+
+    def _publish_runner_job(
+            self,
+            child: RunnerBackendContract,
+            plan,
+            source_path: Path,
+            *,
+            job_id: str,
+            variant_id: str,
+            progress: PublishProgressReporter,
+    ) -> tuple[dict[str, Any], str]:
+        """Publish one Runner job and mark it READY.
+
+        LifecyclePublishService overrides this hook so the runtime lifecycle
+        advisory lock can remain held through mark_job_ready().
+        """
+        result, artifact_ref = self._publish_runner(
+            child,
+            plan,
+            source_path,
+            progress=progress,
+        )
+        self.store.mark_job_ready(
+            job_id,
+            variant_id,
+            artifact_ref=artifact_ref,
+            result=result,
+        )
+        return result, artifact_ref
 
     def _publish_runner(
             self,
             child: RunnerBackendContract,
             plan,
             source_path: Path,
+            *,
+            progress: PublishProgressReporter,
     ) -> tuple[dict[str, Any], str]:
+        progress.emit(
+            "READING_REQUIREMENTS",
+            "正在读取 Runner 算子的 Python requirements",
+        )
         requirements = read_requirements(source_path)
-        runtime = self.build_client.resolve(requirements)
+        runtime = self.build_client.resolve(
+            requirements,
+            progress=lambda stage, message, detail=None: progress.emit(
+                stage,
+                message,
+                detail=detail,
+            ),
+        )
 
         if not runtime.get("found"):
             raise PublishError(
@@ -736,6 +890,14 @@ class PublishService:
                 f"status={runtime.get('status')}"
             )
 
+        progress.emit(
+            "BUILDING_PACKAGE",
+            "Runner Runtime 已就绪，正在生成 Release 文件",
+            detail={
+                "envKey": runtime.get("envKey"),
+                "runtimeEnvKey": runtime.get("runtimeEnvKey"),
+            },
+        )
         with tempfile.TemporaryDirectory(
                 prefix="mpr-runner-publish-"
         ) as temp:
@@ -746,6 +908,10 @@ class PublishService:
                 staging,
                 contract=child,
                 plan=plan,
+            )
+            progress.emit(
+                "PERSISTING",
+                "正在写入 Runner Release 与 Catalog",
             )
             release = self.publisher.publish(
                 staging,
@@ -797,6 +963,7 @@ class PublishService:
                 "The new NiFi Native operator cannot share one dependency "
                 "environment with the operators already published to this edge target."
             ),
+            "edgeIdentity": child.backend_options["edgeIdentity"],
             "targetPlatform": {
                 "os": child.target_platform.os,
                 "arch": child.target_platform.arch,
@@ -820,6 +987,62 @@ class PublishService:
             "resolverError": exc.stderr or exc.stdout or str(exc),
         }
 
+    @staticmethod
+    def _same_edge_members(expected: list[dict[str, Any]], actual: list[dict[str, Any]]) -> bool:
+        """Compare the complete machine environment, not only the requested operator."""
+
+        def signature(member):
+            requirements = member.get("requirements_json")
+            if requirements is None:
+                requirements = member.get("requirements") or []
+            return (
+                str(member["operator_id"]), str(member["variant_id"]),
+                str(member["package_name"]), tuple(requirements),
+            )
+
+        return sorted(map(signature, expected)) == sorted(map(signature, actual))
+
+    @staticmethod
+    def _native_publish_result(
+            child: NifiNativeBackendContract, *, native_artifact: Path,
+            bundle_id: str, revision: int, bundle_file: Path, bundle_ref: str,
+            bundle_sha256: str, bundle_md5: str, lock_sha256: str,
+            package_count: int, processor_count: int, reused: bool,
+    ) -> dict[str, Any]:
+        target = child.target_platform
+        return {
+            "packageName": child.package_name,
+            "className": child.class_name,
+            "processorType": child.processor_type,
+            "artifactFile": str(native_artifact),
+            "deploymentRequired": True,
+            "deploymentMode": child.deployment_mode,
+            "edgeIdentity": child.backend_options["edgeIdentity"],
+            "targetPlatform": {
+                "os": target.os,
+                "arch": target.arch,
+                "pythonVersion": target.python_version,
+                "uvPythonPlatform": target.uv_python_platform,
+            },
+            "edgeBundle": {
+                "bundleId": bundle_id,
+                "revision": revision,
+                "artifactFile": str(bundle_file),
+                "artifactRef": bundle_ref,
+                "artifactSha256": bundle_sha256,
+                "artifactMd5": bundle_md5,
+                "dependencyLockSha256": lock_sha256,
+                "dependencyPackageCount": package_count,
+                "processorCount": processor_count,
+            },
+            "reusedExistingBundle": reused,
+            "deploymentHint": (
+                "Deploy this full edge bundle atomically. It contains the shared "
+                "target-platform dependency layer and every currently active "
+                "NiFi Native processor for this user, target, and edge device."
+            ),
+        }
+
     def _publish_native(
             self,
             operator_id: str,
@@ -828,149 +1051,201 @@ class PublishService:
             child: NifiNativeBackendContract,
             plan,
             source_path: Path,
+            *,
+            user_id: str,
+            force_rebuild: bool = False,
+            progress: PublishProgressReporter,
     ) -> tuple[dict[str, Any], str]:
-        artifact = write_native_package(
-            self.settings.native_artifact_root,
-            contract=child,
-            plan=plan,
-            source_path=source_path,
-        )
         target = child.target_platform
-        user_id = self.settings.default_user_id
+        edge_identity = child.backend_options["edgeIdentity"]
+        token_pair, edge_name = edge_identity["tokenPair"], edge_identity["edgeName"]
+        device = {
+            "user_id": user_id,
+            "target_os": target.os,
+            "target_arch": target.arch,
+            "python_version": target.python_version,
+            "token_pair": token_pair,
+            "edge_name": edge_name,
+        }
 
-        with self.store.edge_publish_lock(
-                user_id=user_id,
-                target_os=target.os,
-                target_arch=target.arch,
-                python_version=target.python_version,
-        ) as edge_conn:
-            current_rows = self.store.list_edge_deployments(
-                user_id=user_id,
-                target_os=target.os,
-                target_arch=target.arch,
-                python_version=target.python_version,
-                exclude_operator_id=operator_id,
-                conn=edge_conn,
-            )
-            members = [
-                self._edge_member_from_row(row)
-                for row in current_rows
-            ]
-            candidate = {
-                "operator_id": operator_id,
-                "variant_id": str(variant["id"]),
-                "package_name": child.package_name,
-                "artifact_file": str(artifact),
-                "requirements": list(child.requirements),
-            }
-            members.append(candidate)
-            print(len(members))
-            all_requirements = [
-                requirement
-                for member in members
-                for requirement in member["requirements"]
-            ]
-
-            try:
-                resolution = self.edge_resolver.resolve(
-                    all_requirements,
-                    target=target,
-                )
-            except EdgeDependencyResolutionError as exc:
-                raise EdgeDependencyConflictError(
-                    self._dependency_conflict_detail(
-                        operator_id=operator_id,
-                        child=child,
-                        members=members,
-                        exc=exc,
-                    )
-                ) from exc
-
-            revision = self.store.next_edge_bundle_revision(
-                user_id=user_id,
-                target_os=target.os,
-                target_arch=target.arch,
-                python_version=target.python_version,
-                conn=edge_conn,
-            )
-
-            try:
-                bundle_file, bundle_sha256, bundle_md5, manifest = build_edge_bundle(
-                    self.settings.edge_bundle_root,
-                    user_id=user_id,
-                    target=target,
-                    revision=revision,
-                    members=members,
-                    resolution=resolution,
-                    resolver=self.edge_resolver,
-                )
-            except EdgeDependencyResolutionError as exc:
-                raise EdgeDependencyConflictError(
-                    self._dependency_conflict_detail(
-                        operator_id=operator_id,
-                        child=child,
-                        members=members,
-                        exc=exc,
-                    )
-                ) from exc
-
-            bundle_ref = f"edge-native-bundle:{bundle_file.name}"
-            bundle_id = str(uuid.uuid4())
-
-            result = {
-                "packageName": child.package_name,
-                "className": child.class_name,
-                "processorType": child.processor_type,
-                "artifactFile": str(artifact),
-                "deploymentRequired": True,
-                "deploymentMode": child.deployment_mode,
+        progress.emit(
+            "WAITING_LOCK",
+            "正在等待目标边端机器的发布锁",
+            detail={
+                "edgeIdentity": edge_identity,
                 "targetPlatform": {
                     "os": target.os,
                     "arch": target.arch,
                     "pythonVersion": target.python_version,
                     "uvPythonPlatform": target.uv_python_platform,
                 },
-                "edgeBundle": {
-                    "bundleId": bundle_id,
+            },
+        )
+
+        # Keep the lookup, comparison, and commit under the same device-scoped lock.
+        with self.store.edge_publish_lock(**device) as edge_conn:
+            progress.emit(
+                "CHECKING_BUNDLE_REUSE",
+                "已获取边端发布锁，正在检查现有 Bundle 是否可以直接复用",
+                detail={"edgeIdentity": edge_identity},
+            )
+            current_rows = self.store.list_edge_deployments(**device, conn=edge_conn)
+            current = next((row for row in current_rows if str(row["operator_id"]) == str(operator_id)), None)
+            members = [
+                self._edge_member_from_row(row)
+                for row in current_rows if str(row["operator_id"]) != str(operator_id)
+            ]
+            candidate = {
+                "operator_id": str(operator_id),
+                "variant_id": str(variant["id"]),
+                "package_name": child.package_name,
+                "requirements": list(child.requirements),
+            }
+            expected_members = members + [candidate]
+
+            if not force_rebuild and current is not None:
+                latest = self.store.get_latest_edge_bundle(**device, conn=edge_conn)
+                if latest is not None and latest["uv_python_platform"] == target.uv_python_platform:
+                    latest_members = self.store.list_edge_bundle_members(bundle_id=latest["id"], conn=edge_conn)
+                    current_matches = self._same_edge_members([candidate], [current])
+                    if current_matches and self._same_edge_members(expected_members, latest_members):
+                        native_file = Path(current["artifact_file"])
+                        progress.emit(
+                            "VERIFYING_ARTIFACT",
+                            "发布内容未变化，正在校验已有 Edge Bundle 完整性",
+                            detail={
+                                "bundleId": str(latest["id"]),
+                                "revision": latest["revision"],
+                            },
+                        )
+                        try:
+                            bundle_file = self._edge_bundle_path_from_row(latest)
+                            bundle_sha256, bundle_md5 = _file_hashes(bundle_file)
+                        except (PublishError, OSError):
+                            logger.warning("Existing edge bundle is unavailable; rebuilding: bundle_id=%s",
+                                           latest["id"])
+                        else:
+                            if native_file.is_file() and bundle_sha256 == latest["artifact_sha256"]:
+                                manifest = latest["manifest_json"]
+                                bundle_ref = str(latest["artifact_ref"])
+                                result = self._native_publish_result(
+                                    child, native_artifact=native_file,
+                                    bundle_id=str(latest["id"]), revision=latest["revision"],
+                                    bundle_file=bundle_file, bundle_ref=bundle_ref,
+                                    bundle_sha256=bundle_sha256, bundle_md5=bundle_md5,
+                                    lock_sha256=latest["lock_sha256"],
+                                    package_count=manifest.get("dependencyPackageCount", 0),
+                                    processor_count=len(latest_members), reused=True,
+                                )
+                                progress.emit(
+                                    "PERSISTING",
+                                    "已有 Bundle 校验通过，直接复用现有发布产物",
+                                    detail={
+                                        "bundleId": str(latest["id"]),
+                                        "revision": latest["revision"],
+                                        "reusedExistingBundle": True,
+                                    },
+                                )
+                                self.store.mark_job_ready(
+                                    job_id, str(variant["id"]), artifact_ref=bundle_ref,
+                                    result=result, conn=edge_conn,
+                                )
+                                return result, bundle_ref
+                            logger.warning(
+                                "Existing edge artifacts are missing or corrupted; rebuilding: bundle_id=%s",
+                                latest["id"]
+                            )
+
+            # Cache miss: regenerate the processor ZIP and the complete shared environment.
+            progress.emit(
+                "BUILDING_PACKAGE",
+                "现有 Bundle 无法复用，正在生成 NiFi Native Processor 包",
+                detail={"forceRebuild": force_rebuild},
+            )
+            artifact = write_native_package(
+                self.settings.native_artifact_root, contract=child,
+                plan=plan, source_path=source_path,
+            )
+            members.append({**candidate, "artifact_file": str(artifact)})
+            all_requirements = [req for member in members for req in member["requirements"]]
+            progress.emit(
+                "RESOLVING_DEPENDENCIES",
+                "正在解析该边端机器完整环境的共享 Python 依赖",
+                detail={
+                    "directRequirementCount": len(all_requirements),
+                    "processorCount": len(members),
+                },
+            )
+            try:
+                resolution = self.edge_resolver.resolve(all_requirements, target=target)
+            except EdgeDependencyResolutionError as exc:
+                raise EdgeDependencyConflictError(
+                    self._dependency_conflict_detail(
+                        operator_id=operator_id, child=child, members=members, exc=exc,
+                    )
+                ) from exc
+
+            revision = self.store.next_edge_bundle_revision(**device, conn=edge_conn)
+            progress.emit(
+                "BUILDING_BUNDLE",
+                "依赖解析完成，正在生成完整 Edge Bundle",
+                detail={
                     "revision": revision,
-                    "artifactFile": str(bundle_file),
-                    "artifactRef": bundle_ref,
-                    "artifactSha256": bundle_sha256,
-                    "artifactMd5": bundle_md5,
-                    "dependencyLockSha256": resolution.lock_sha256,
                     "dependencyPackageCount": resolution.package_count,
                     "processorCount": len(members),
                 },
-                "deploymentHint": (
-                    "Deploy this full edge bundle atomically. It contains the shared "
-                    "target-platform dependency layer and every currently active "
-                    "NiFi Native processor for this user and target."
-                ),
-            }
+            )
+            try:
+                bundle_file, bundle_sha256, bundle_md5, manifest = build_edge_bundle(
+                    self.settings.edge_bundle_root, user_id=user_id, target=target,
+                    token_pair=token_pair, edge_name=edge_name, revision=revision,
+                    members=members, resolution=resolution, resolver=self.edge_resolver,
+                    progress=lambda stage, message, detail=None: progress.emit(
+                        stage,
+                        message,
+                        detail=detail,
+                    ),
+                )
+            except EdgeDependencyResolutionError as exc:
+                raise EdgeDependencyConflictError(
+                    self._dependency_conflict_detail(
+                        operator_id=operator_id, child=child, members=members, exc=exc,
+                    )
+                ) from exc
 
+            bundle_ref = f"edge-native-bundle:{bundle_file.name}"
+            bundle_id = str(uuid.uuid4())
+            result = self._native_publish_result(
+                child, native_artifact=artifact, bundle_id=bundle_id, revision=revision,
+                bundle_file=bundle_file, bundle_ref=bundle_ref,
+                bundle_sha256=bundle_sha256, bundle_md5=bundle_md5,
+                lock_sha256=resolution.lock_sha256,
+                package_count=resolution.package_count,
+                processor_count=len(members), reused=False,
+            )
+            progress.emit(
+                "PERSISTING",
+                "正在保存 Edge Bundle、部署成员和发布结果",
+                detail={
+                    "bundleId": bundle_id,
+                    "revision": revision,
+                    "reusedExistingBundle": False,
+                },
+            )
             self.store.commit_edge_publish(
-                user_id=user_id,
-                operator_id=operator_id,
-                variant_id=str(variant["id"]),
-                bundle_id=bundle_id,
-                job_id=job_id,
-                published_result=result,
-                target_os=target.os,
-                target_arch=target.arch,
-                python_version=target.python_version,
-                uv_python_platform=target.uv_python_platform,
-                package_name=child.package_name,
-                native_artifact_file=str(artifact),
+                user_id=user_id, operator_id=operator_id, variant_id=str(variant["id"]),
+                bundle_id=bundle_id, job_id=job_id, published_result=result,
+                target_os=target.os, target_arch=target.arch,
+                python_version=target.python_version, token_pair=token_pair,
+                edge_name=edge_name, uv_python_platform=target.uv_python_platform,
+                package_name=child.package_name, native_artifact_file=str(artifact),
                 candidate_requirements=list(child.requirements),
                 bundle_revision=revision,
                 bundle_requirements=list(resolution.direct_requirements),
                 requirements_lock=resolution.lock_text,
-                lock_sha256=resolution.lock_sha256,
-                bundle_artifact_ref=bundle_ref,
-                bundle_artifact_sha256=bundle_sha256,
-                manifest=manifest,
-                members=members,
-                conn=edge_conn,
+                lock_sha256=resolution.lock_sha256, bundle_artifact_ref=bundle_ref,
+                bundle_artifact_sha256=bundle_sha256, manifest=manifest,
+                members=members, conn=edge_conn,
             )
 
         return result, bundle_ref

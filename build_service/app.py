@@ -12,6 +12,7 @@ from pydantic import BaseModel
 
 from .harbor import HarborClient
 from .lifecycle_routes import install_build_lifecycle_routes
+from .progress_routes import install_build_progress_routes
 from .lifecycle_service import LifecycleBuildService, LifecycleBuildStore
 from .service import BuildService, BuildSettings
 
@@ -177,6 +178,7 @@ def create_app(service: BuildService | None = None) -> FastAPI:
             )
             raise
 
+    install_build_progress_routes(application)
     install_build_lifecycle_routes(application)
     return application
 

@@ -164,6 +164,47 @@ def _target_payload(callable_info: CallableInfo) -> dict[str, Any]:
     return payload
 
 
+def _validate_output_codecs(
+    output: dict[str, Any],
+    return_annotation: str | None,
+) -> None:
+    fields = [("payload", output["payload"])]
+    fields.extend(
+        (f"metadata.{name}", spec)
+        for name, spec in output.get("metadata", {}).items()
+    )
+
+    for field, spec in fields:
+        codec = spec.get("codec", "bytes")
+
+        if codec not in {"bytes", "text", "json"}:
+            raise ContractCompilationError(
+                f"output.{field}: unsupported output codec {codec!r}; "
+                "binary_stream is input-only"
+            )
+
+        if codec == "bytes" and spec.get("source") == "constant":
+            value = spec.get("value")
+            if value is not None and not isinstance(
+                value, (str, bytes, bytearray, memoryview)
+            ):
+                raise ContractCompilationError(
+                    f"output.{field}: constant of type {type(value).__name__} "
+                    "cannot use bytes; select json"
+                )
+
+    payload = output["payload"]
+    if payload.get("codec") == "bytes" and payload.get("source", "return") == "return":
+        annotation = (return_annotation or "").replace("typing.", "").replace(" ", "").lower()
+        prefix = annotation.split("[", 1)[0].split("|", 1)[0]
+
+        if prefix in {"dict", "list", "tuple", "set", "mapping", "sequence"}:
+            raise ContractCompilationError(
+                f"output.payload: return annotation {return_annotation!r} "
+                "is structured; select json instead of bytes"
+            )
+
+
 def compile_virtual_contract(contract: VirtualOperatorContract, catalog: ProjectCatalog) -> ExecutionPlan:
     if contract.source.source_revision != catalog.source_revision:
         raise ContractCompilationError(
@@ -220,7 +261,8 @@ def compile_virtual_contract(contract: VirtualOperatorContract, catalog: Project
         if item["source"] == BindingSource.INPUT_METADATA.value and item["metadata_key"]
     })
     output_metadata = sorted(contract.output.metadata)
-
+    compiled_output = contract.output.model_dump(mode="json")
+    _validate_output_codecs(compiled_output, callable_info.return_annotation)
     return ExecutionPlan(
         source_revision=contract.source.source_revision,
         source_ref=contract.source.source_ref,
@@ -228,7 +270,7 @@ def compile_virtual_contract(contract: VirtualOperatorContract, catalog: Project
         target=_target_payload(callable_info),
         constructor_arguments=constructor_arguments,
         arguments=arguments,
-        output=contract.output.model_dump(mode="json"),
+        output=compiled_output,
         parameters=sorted(parameters.values(), key=lambda item: item.key),
         input_metadata=input_metadata,
         output_metadata=output_metadata,

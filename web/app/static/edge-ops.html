@@ -6,6 +6,8 @@
   <title>边端运维观测 · Managed Python</title>
   <link rel="stylesheet" href="/static/styles.css">
   <link rel="stylesheet" href="/static/edge.css">
+  <link rel="stylesheet" href="/static/edge-identity.css">
+  <script defer src="/static/edge-identity.js"></script>
   <script defer src="/static/edge-ops.js"></script>
 </head>
 <body>
@@ -25,44 +27,49 @@
       </div>
     </div>
   </header>
-
   <main class="edge-console">
     <div class="edge-console-header">
       <div>
         <span class="eyebrow">EDGE NATIVE · OPERATIONS</span>
         <h1>发布与 Bundle 观测</h1>
-        <p>查看 NiFi Native 发布任务、失败原因和 Edge Bundle revision 历史。</p>
+        <p>按边端机器查看 NiFi Native 发布任务、失败原因和各自的 Bundle revision 历史。</p>
       </div>
       <div class="edge-console-actions">
         <button id="refreshBtn" class="button secondary" type="button">刷新</button>
         <a class="button primary" href="/admin/edge">查看当前环境</a>
       </div>
     </div>
-
     <div id="notice" class="notice hidden" role="status">
       <span class="notice-mark">i</span>
       <span id="noticeText"></span>
     </div>
 
-    <section id="metrics" class="edge-metrics"></section>
-
+    <div class="edge-machine-filters" role="search" aria-label="按边端机器筛选">
+      <label for="tokenPairFilter">token_pair
+        <input id="tokenPairFilter" type="search" placeholder="按 token_pair 筛选；历史记录可输入“历史未指定”">
+      </label>
+      <label for="edgeNameFilter">edge_name
+        <input id="edgeNameFilter" type="search" placeholder="按 edge_name 筛选">
+      </label>
+      <button id="clearFiltersBtn" class="button secondary" type="button">清除筛选</button>
+    </div>
+    <section id="metrics" class="edge-metrics" aria-label="当前筛选范围的统计"></section>
     <section class="panel">
       <div class="section-heading">
         <span class="section-number">01</span>
         <div>
           <h2>最近 Native 发布任务</h2>
-          <p>包含成功、失败和依赖冲突任务；失败不会切换当前边端环境。</p>
+          <p>包含成功、失败和依赖冲突任务；每条记录同时展示目标平台与设备身份。</p>
         </div>
       </div>
       <div id="operationList" class="edge-op-list"></div>
     </section>
-
     <section class="panel">
       <div class="section-heading">
         <span class="section-number">02</span>
         <div>
           <h2>Bundle Revision 历史</h2>
-          <p>每个成功 revision 都是完整快照，可用于下载、校验和回滚。</p>
+          <p>Revision 按机器与平台独立计算；成功 Bundle 是完整快照，可下载校验。</p>
         </div>
       </div>
       <div class="edge-table-wrap">
@@ -71,11 +78,14 @@
             <tr>
               <th>Revision</th>
               <th>目标平台</th>
+              <th>edge_name</th>
+              <th>token_pair</th>
               <th>Processor</th>
               <th>依赖包</th>
               <th>Lock SHA</th>
               <th>Artifact SHA</th>
               <th>时间</th>
+              <th></th>
             </tr>
           </thead>
           <tbody id="bundleRows"></tbody>

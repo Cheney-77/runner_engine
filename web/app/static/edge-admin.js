@@ -2,24 +2,8 @@
 
 (() => {
   const byId = (id) => document.getElementById(id);
-
-  function formatTime(value) {
-    if (!value) return "—";
-    const date = new Date(value);
-    return Number.isNaN(date.getTime()) ? String(value) : date.toLocaleString();
-  }
-
-  function targetKey(target) {
-    return [
-      target?.os || "unknown",
-      target?.arch || "unknown",
-      target?.pythonVersion || "unknown",
-    ].join("|");
-  }
-
-  function targetLabel(target) {
-    return `${target?.os || "—"} · ${target?.arch || "—"} · Python ${target?.pythonVersion || "—"}`;
-  }
+  const Edge = globalThis.EdgeIdentity;
+  let state = {userId: null, deployments: [], bundles: []};
 
   function showNotice(message, kind = "") {
     byId("noticeText").textContent = message;
@@ -29,155 +13,106 @@
   async function getJson(path) {
     const response = await fetch(path, {headers: {Accept: "application/json"}});
     const data = await response.json().catch(() => null);
-
     if (!response.ok) {
       const detail = data?.detail;
-      throw new Error(
-        typeof detail === "string"
-          ? detail
-          : `HTTP ${response.status}: ${JSON.stringify(detail ?? data)}`
-      );
+      throw new Error(typeof detail === "string" ? detail : `HTTP ${response.status}: ${JSON.stringify(detail ?? data)}`);
     }
-
     return data;
   }
 
+  function element(tag, text, className = "") {
+    const node = document.createElement(tag);
+    if (className) node.className = className;
+    if (text !== undefined) node.textContent = String(text);
+    return node;
+  }
+
   function metric(label, value) {
-    const card = document.createElement("div");
-    card.className = "edge-metric";
-
-    const caption = document.createElement("span");
-    caption.textContent = label;
-
-    const strong = document.createElement("strong");
-    strong.textContent = String(value);
-
-    card.append(caption, strong);
+    const card = element("div", undefined, "edge-metric");
+    card.append(element("span", label), element("strong", value));
     return card;
   }
 
+  function filters() {
+    return [byId("tokenPairFilter").value, byId("edgeNameFilter").value];
+  }
+
   function renderMetrics(deployments, bundles) {
-    const environments = new Set(
-      deployments.map((item) => targetKey(item.targetPlatform))
-    );
-
-    const latestRevisions = new Map();
-    for (const bundle of bundles) {
-      const key = targetKey(bundle.targetPlatform);
-      if (!latestRevisions.has(key)) {
-        latestRevisions.set(key, bundle.revision);
-      }
-    }
-
-    const metrics = byId("metrics");
-    metrics.replaceChildren(
-      metric("共享环境", environments.size),
+    const environments = new Set(deployments.map((item) => Edge.scopeKey(item, state.userId)));
+    byId("metrics").replaceChildren(
+      metric("当前独立环境", environments.size),
+      metric("当前已绑定机器", Edge.distinctMachines(deployments)),
       metric("当前算子", deployments.length),
-      metric("历史 Bundle", bundles.length),
-      metric("最新环境 Revision", latestRevisions.size
-        ? Math.max(...latestRevisions.values())
-        : 0),
+      metric("最近 Bundle（已加载）", bundles.length),
     );
   }
 
   function requirementsNode(requirements) {
-    const code = document.createElement("code");
-    code.textContent = Array.isArray(requirements) && requirements.length
-      ? requirements.join(", ")
-      : "无显式依赖";
-    return code;
+    return element("code", Array.isArray(requirements) && requirements.length ? requirements.join(", ") : "无显式依赖");
+  }
+
+  function identityDetails(item) {
+    const identity = Edge.identityOf(item);
+    const meta = element("div", undefined, "edge-identity-meta");
+    meta.append(
+      element("span", `User ID：${item.userId ?? state.userId ?? "—"}`),
+      element("span", `edge_name：${Edge.fieldLabel(identity.edgeName, identity)}`),
+      element("span", `token_pair：${Edge.fieldLabel(identity.tokenPair, identity)}`),
+    );
+    return meta;
   }
 
   function renderEnvironments(deployments, bundles) {
     const groups = new Map();
-
     for (const deployment of deployments) {
-      const key = targetKey(deployment.targetPlatform);
-      if (!groups.has(key)) {
-        groups.set(key, {
-          target: deployment.targetPlatform,
-          deployments: [],
-        });
-      }
+      const key = Edge.scopeKey(deployment, state.userId);
+      if (!groups.has(key)) groups.set(key, {sample: deployment, deployments: []});
       groups.get(key).deployments.push(deployment);
     }
 
-    const latestByTarget = new Map();
-    for (const bundle of bundles) {
-      const key = targetKey(bundle.targetPlatform);
-      if (!latestByTarget.has(key)) latestByTarget.set(key, bundle);
+    const latestByScope = new Map();
+    for (const bundle of [...bundles].sort((a, b) => String(b.createdAt || "").localeCompare(String(a.createdAt || "")))) {
+      const key = Edge.scopeKey(bundle, state.userId);
+      if (!latestByScope.has(key)) latestByScope.set(key, bundle);
     }
 
     const container = byId("environmentList");
     container.replaceChildren();
-
     if (!groups.size) {
-      const empty = document.createElement("div");
-      empty.className = "edge-empty";
-      empty.textContent = "还没有 NiFi Native 算子加入边端共享环境。";
-      container.append(empty);
+      container.append(element("div", "当前筛选条件下没有已部署的 NiFi Native 算子。", "edge-empty"));
       return;
     }
 
     for (const [key, group] of groups) {
-      const card = document.createElement("article");
-      card.className = "edge-env-card";
+      const card = element("article", undefined, "edge-env-card");
+      const header = element("header");
+      const heading = element("div", undefined, "edge-env-heading");
+      heading.append(element("h2", Edge.targetLabel(Edge.targetOf(group.sample))), identityDetails(group.sample));
+      const bundle = latestByScope.get(key);
+      const badge = element("span", bundle ? `最近 Revision ${bundle.revision}` : "最近列表中无 Bundle", "edge-status");
+      header.append(heading, badge);
 
-      const header = document.createElement("header");
-      const title = document.createElement("h2");
-      title.textContent = targetLabel(group.target);
-
-      const bundle = latestByTarget.get(key);
-      const badge = document.createElement("span");
-      badge.className = "edge-status";
-      badge.textContent = bundle
-        ? `Revision ${bundle.revision}`
-        : "尚无 Bundle";
-
-      header.append(title, badge);
-
-      const wrap = document.createElement("div");
-      wrap.className = "edge-table-wrap";
-
-      const table = document.createElement("table");
-      table.className = "edge-table";
-      table.innerHTML = `
-        <thead>
-          <tr>
-            <th>算子</th>
-            <th>Workspace</th>
-            <th>Package</th>
-            <th>直接依赖</th>
-            <th>更新时间</th>
-          </tr>
-        </thead>
-      `;
-
-      const tbody = document.createElement("tbody");
+      const wrap = element("div", undefined, "edge-table-wrap");
+      const table = element("table", undefined, "edge-table");
+      const thead = element("thead");
+      const headings = element("tr");
+      ["算子", "Workspace", "Package", "直接依赖", "更新时间"].forEach((label) => headings.append(element("th", label)));
+      thead.append(headings);
+      table.append(thead);
+      const tbody = element("tbody");
       for (const item of group.deployments) {
-        const row = document.createElement("tr");
-
-        const operator = document.createElement("td");
-        operator.textContent = item.displayName || item.name || item.operatorId;
-
-        const workspace = document.createElement("td");
-        workspace.textContent = item.workspace || "—";
-
-        const packageName = document.createElement("td");
-        const packageCode = document.createElement("code");
-        packageCode.textContent = item.packageName || "—";
-        packageName.append(packageCode);
-
-        const requirements = document.createElement("td");
+        const row = element("tr");
+        const packageName = element("td");
+        packageName.append(element("code", item.packageName || "—"));
+        const requirements = element("td");
         requirements.append(requirementsNode(item.requirements));
-
-        const updated = document.createElement("td");
-        updated.textContent = formatTime(item.updatedAt);
-
-        row.append(operator, workspace, packageName, requirements, updated);
+        row.append(
+          element("td", item.displayName || item.name || item.operatorId),
+          element("td", item.workspace || "—"), packageName,
+          requirements, element("td", Edge.formatTime(item.updatedAt)),
+        );
         tbody.append(row);
       }
-
       table.append(tbody);
       wrap.append(table);
       card.append(header, wrap);
@@ -188,71 +123,61 @@
   function renderBundles(bundles) {
     const tbody = byId("bundleRows");
     tbody.replaceChildren();
-
     if (!bundles.length) {
-      const row = document.createElement("tr");
-      const cell = document.createElement("td");
-      cell.colSpan = 7;
-      cell.className = "edge-empty";
-      cell.textContent = "暂无 Edge Bundle。";
+      const cell = element("td", "当前筛选条件下暂无 Edge Bundle。", "edge-empty");
+      cell.colSpan = 9;
+      const row = element("tr");
       row.append(cell);
       tbody.append(row);
       return;
     }
 
     for (const bundle of bundles) {
-      const row = document.createElement("tr");
-
-      const revision = document.createElement("td");
-      revision.textContent = String(bundle.revision ?? "—");
-
-      const target = document.createElement("td");
-      target.textContent = targetLabel(bundle.targetPlatform);
-
-      const processors = document.createElement("td");
-      processors.textContent = String(bundle.manifest?.processors?.length ?? "—");
-
-      const packages = document.createElement("td");
-      packages.textContent = String(bundle.manifest?.dependencyPackageCount ?? "—");
-
-      const sha = document.createElement("td");
-      const code = document.createElement("code");
-      code.textContent = bundle.artifactSha256
-        ? `${bundle.artifactSha256.slice(0, 14)}…`
-        : "—";
-      sha.append(code);
-
-      const created = document.createElement("td");
-      created.textContent = formatTime(bundle.createdAt);
-
-      const actions = document.createElement("td");
-      const link = document.createElement("a");
-      link.className = "text-button";
-      link.href = `/api/edge/bundles/${encodeURIComponent(bundle.bundleId)}/download`;
-      link.textContent = "下载";
-      actions.append(link);
-
-      row.append(revision, target, processors, packages, sha, created, actions);
+      const identity = Edge.identityOf(bundle);
+      const row = element("tr");
+      const name = element("td", Edge.fieldLabel(identity.edgeName, identity));
+      const token = element("td");
+      token.append(element("code", Edge.fieldLabel(identity.tokenPair, identity)));
+      const sha = element("td");
+      sha.append(element("code", bundle.artifactSha256 ? `${bundle.artifactSha256.slice(0, 14)}…` : "—"));
+      const actions = element("td");
+      if (bundle.bundleId) {
+        const link = element("a", "下载", "text-button");
+        link.href = `/api/edge/bundles/${encodeURIComponent(bundle.bundleId)}/download`;
+        actions.append(link);
+      }
+      row.append(
+        element("td", bundle.revision ?? "—"), element("td", Edge.targetLabel(Edge.targetOf(bundle))),
+        name, token, element("td", bundle.manifest?.processors?.length ?? "—"),
+        element("td", bundle.manifest?.dependencyPackageCount ?? "—"), sha,
+        element("td", Edge.formatTime(bundle.createdAt)), actions,
+      );
       tbody.append(row);
     }
   }
 
+  function render() {
+    const [tokenQuery, nameQuery] = filters();
+    const deployments = state.deployments.filter((item) => Edge.matches(item, tokenQuery, nameQuery));
+    const bundles = state.bundles.filter((item) => Edge.matches(item, tokenQuery, nameQuery));
+    renderMetrics(deployments, bundles);
+    renderEnvironments(deployments, bundles);
+    renderBundles(bundles);
+  }
+
   async function refresh() {
     byId("refreshBtn").disabled = true;
-
     try {
       const [deploymentsResponse, bundlesResponse] = await Promise.all([
-        getJson("/api/edge/deployments"),
-        getJson("/api/edge/bundles?limit=100"),
+        getJson("/api/edge/deployments"), getJson("/api/edge/bundles?limit=100"),
       ]);
-
-      const deployments = deploymentsResponse?.deployments || [];
-      const bundles = bundlesResponse?.bundles || [];
-
-      renderMetrics(deployments, bundles);
-      renderEnvironments(deployments, bundles);
-      renderBundles(bundles);
-      showNotice(`已加载 ${deployments.length} 个当前算子和 ${bundles.length} 个 Bundle。`, "success");
+      state = {
+        userId: deploymentsResponse?.userId ?? bundlesResponse?.userId ?? null,
+        deployments: Array.isArray(deploymentsResponse?.deployments) ? deploymentsResponse.deployments : [],
+        bundles: Array.isArray(bundlesResponse?.bundles) ? bundlesResponse.bundles : [],
+      };
+      render();
+      showNotice(`已加载 ${state.deployments.length} 个当前算子和最近 ${state.bundles.length} 个 Bundle。筛选和统计基于已加载数据。`, "success");
     } catch (error) {
       showNotice(error.message || String(error), "error");
     } finally {
@@ -261,5 +186,12 @@
   }
 
   byId("refreshBtn").addEventListener("click", refresh);
+  byId("tokenPairFilter").addEventListener("input", render);
+  byId("edgeNameFilter").addEventListener("input", render);
+  byId("clearFiltersBtn").addEventListener("click", () => {
+    byId("tokenPairFilter").value = "";
+    byId("edgeNameFilter").value = "";
+    render();
+  });
   refresh();
 })();

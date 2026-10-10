@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
+from typing import Any, Callable
 
 from .builder import build_runtime_image, lock_requirements, verify_runtime_image
 from .model import RuntimeBuildSpec
@@ -9,6 +10,11 @@ from .store import BuildStore
 
 
 logger = logging.getLogger(__name__)
+
+ProgressCallback = Callable[
+    [str, str, dict[str, Any] | None],
+    None,
+]
 
 
 @dataclass(frozen=True)
@@ -28,13 +34,34 @@ class BuildService:
         self.store = store
         self.settings = settings
 
-    def resolve(self, requirements: list[str]):
+    @staticmethod
+    def _emit(
+        progress: ProgressCallback | None,
+        stage: str,
+        message: str,
+        detail: dict[str, Any] | None = None,
+    ) -> None:
+        if progress is not None:
+            progress(stage, message, detail)
+
+    def resolve(
+        self,
+        requirements: list[str],
+        *,
+        progress: ProgressCallback | None = None,
+    ):
         logger.info(
             "Resolving runtime environment requirements=%d python=%s platform=%s policy=%s",
             len(requirements),
             self.settings.python_version,
             self.settings.platform,
             self.settings.build_policy_version,
+        )
+        self._emit(
+            progress,
+            "RESOLVING_DEPENDENCIES",
+            "正在解析 Runner Runtime 的 Python 依赖",
+            {"directRequirementCount": len(requirements)},
         )
 
         lock_text = lock_requirements(
@@ -58,6 +85,16 @@ class BuildService:
             len(spec.packages),
             spec.lock_sha256,
         )
+        self._emit(
+            progress,
+            "CHECKING_RUNTIME_CACHE",
+            "依赖锁定完成，正在检查可复用的 Runtime 环境",
+            {
+                "envKey": request_key,
+                "packageCount": len(spec.packages),
+                "lockSha256": spec.lock_sha256,
+            },
+        )
 
         existing = self.store.get_for_request(request_key)
         if existing is not None:
@@ -70,9 +107,41 @@ class BuildService:
             )
 
             if existing["status"] == "PENDING":
-                return self._build(request_key, existing, spec)
+                return self._build(
+                    request_key,
+                    existing,
+                    spec,
+                    progress=progress,
+                )
 
-            if existing["status"] == "FAILED":
+            if existing["status"] == "READY":
+                self._emit(
+                    progress,
+                    "REUSING_RUNTIME",
+                    "已找到可复用的 Runner Runtime 环境",
+                    {
+                        "envKey": request_key,
+                        "environmentId": str(existing["id"]),
+                        "resolutionKind": existing.get("resolution_kind", "exact"),
+                    },
+                )
+                self._emit(
+                    progress,
+                    "RUNTIME_READY",
+                    "Runner Runtime 环境已就绪",
+                    {"envKey": request_key},
+                )
+            elif existing["status"] in {"BUILDING", "VERIFYING"}:
+                self._emit(
+                    progress,
+                    "WAITING_RUNTIME",
+                    "相同 Runtime 环境正在由其他任务构建，等待其完成",
+                    {
+                        "envKey": request_key,
+                        "status": existing["status"],
+                    },
+                )
+            elif existing["status"] == "FAILED":
                 logger.warning(
                     "Runtime environment is FAILED env_key=%s env_id=%s; "
                     "use POST /v1/runtime-environments/%s/retry after fixing the cause",
@@ -80,13 +149,26 @@ class BuildService:
                     existing["id"],
                     request_key,
                 )
+                self._emit(
+                    progress,
+                    "RUNTIME_FAILED",
+                    "已有 Runner Runtime 环境处于 FAILED",
+                    {
+                        "envKey": request_key,
+                        "error": existing.get("last_error"),
+                    },
+                )
 
             return existing
 
         if self.settings.allow_superset_reuse:
             candidate = self.store.find_smallest_superset(spec)
             if candidate is not None:
-                self.store.bind_request(request_key, candidate["id"], "superset")
+                self.store.bind_request(
+                    request_key,
+                    candidate["id"],
+                    "superset",
+                )
                 logger.info(
                     "Reusing compatible runtime superset request_env_key=%s env_id=%s runtime_env_key=%s packages=%d",
                     request_key,
@@ -94,7 +176,25 @@ class BuildService:
                     candidate["env_key"],
                     candidate["package_count"],
                 )
-                return self.store.get_for_request(request_key)
+                reused = self.store.get_for_request(request_key)
+                self._emit(
+                    progress,
+                    "REUSING_RUNTIME",
+                    "已找到满足依赖要求的 Runtime 超集环境",
+                    {
+                        "envKey": request_key,
+                        "runtimeEnvKey": candidate["env_key"],
+                        "environmentId": str(candidate["id"]),
+                        "resolutionKind": "superset",
+                    },
+                )
+                self._emit(
+                    progress,
+                    "RUNTIME_READY",
+                    "Runner Runtime 环境已就绪",
+                    {"envKey": request_key},
+                )
+                return reused
 
         env = self.store.get_or_create_exact(spec)
         self.store.bind_request(request_key, env["id"], "exact")
@@ -107,13 +207,53 @@ class BuildService:
         )
 
         if env["status"] == "PENDING":
-            return self._build(request_key, env, spec)
+            return self._build(
+                request_key,
+                env,
+                spec,
+                progress=progress,
+            )
 
-        if env["status"] == "FAILED":
+        if env["status"] == "READY":
+            self._emit(
+                progress,
+                "REUSING_RUNTIME",
+                "Exact Runtime 环境已经存在，直接复用",
+                {
+                    "envKey": request_key,
+                    "environmentId": str(env["id"]),
+                },
+            )
+            self._emit(
+                progress,
+                "RUNTIME_READY",
+                "Runner Runtime 环境已就绪",
+                {"envKey": request_key},
+            )
+        elif env["status"] in {"BUILDING", "VERIFYING"}:
+            self._emit(
+                progress,
+                "WAITING_RUNTIME",
+                "相同 Runtime 环境正在构建，等待其完成",
+                {
+                    "envKey": request_key,
+                    "status": env["status"],
+                },
+            )
+        elif env["status"] == "FAILED":
             logger.warning(
                 "Exact runtime environment is FAILED env_key=%s env_id=%s; retry explicitly after fixing the cause",
                 request_key,
                 env["id"],
+            )
+            self._emit(
+                progress,
+                "RUNTIME_FAILED",
+                "Runner Runtime 环境构建失败",
+                {
+                    "envKey": request_key,
+                    "error": env.get("last_error"),
+                },
             )
 
         return self.store.get_for_request(request_key)
@@ -154,7 +294,14 @@ class BuildService:
     def get(self, env_key: str):
         return self.store.get_for_request(env_key)
 
-    def _build(self, request_key: str, env, spec: RuntimeBuildSpec):
+    def _build(
+        self,
+        request_key: str,
+        env,
+        spec: RuntimeBuildSpec,
+        *,
+        progress: ProgressCallback | None = None,
+    ):
         job_id = self.store.claim_build(env["id"])
         if job_id is None:
             current = self.store.get_for_request(request_key)
@@ -164,6 +311,15 @@ class BuildService:
                 env["id"],
                 None if current is None else current["status"],
             )
+            self._emit(
+                progress,
+                "WAITING_RUNTIME",
+                "Runtime 构建已被其他并发请求接管，等待现有任务完成",
+                {
+                    "envKey": request_key,
+                    "status": None if current is None else current["status"],
+                },
+            )
             return current
 
         logger.info(
@@ -172,6 +328,17 @@ class BuildService:
             env["id"],
             job_id,
             len(spec.packages),
+        )
+        self._emit(
+            progress,
+            "BUILDING_RUNTIME",
+            "正在构建并推送 Runner Runtime 镜像",
+            {
+                "envKey": request_key,
+                "environmentId": str(env["id"]),
+                "buildJobId": str(job_id),
+                "packageCount": len(spec.packages),
+            },
         )
 
         try:
@@ -189,7 +356,21 @@ class BuildService:
             )
 
             self.store.mark_verifying(env["id"], job_id)
-            logger.info("Runtime verification started env_id=%s job_id=%s", env["id"], job_id)
+            logger.info(
+                "Runtime verification started env_id=%s job_id=%s",
+                env["id"],
+                job_id,
+            )
+            self._emit(
+                progress,
+                "VERIFYING_RUNTIME",
+                "Runtime 镜像已推送，正在验证其中的 Python 依赖",
+                {
+                    "envKey": request_key,
+                    "image": image_ref,
+                    "packageCount": len(spec.packages),
+                },
+            )
 
             verify_runtime_image(image_ref, spec.packages)
 
@@ -201,7 +382,15 @@ class BuildService:
                 job_id,
                 image_ref,
             )
-
+            self._emit(
+                progress,
+                "RUNTIME_READY",
+                "Runner Runtime 环境构建并验证完成",
+                {
+                    "envKey": request_key,
+                    "image": image_ref,
+                },
+            )
         except Exception as exc:
             message = f"{type(exc).__name__}: {exc}"
             logger.exception(
@@ -211,5 +400,14 @@ class BuildService:
                 job_id,
             )
             self.store.mark_failed(env["id"], job_id, message)
+            self._emit(
+                progress,
+                "RUNTIME_FAILED",
+                "Runner Runtime 环境构建失败",
+                {
+                    "envKey": request_key,
+                    "error": message,
+                },
+            )
 
         return self.store.get_for_request(request_key)

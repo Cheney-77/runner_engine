@@ -1,0 +1,133 @@
+# 知识卡导出索引文件
+schema_version: 1
+locale: zh-CN
+branch: main
+nodes_managed: true
+exported_at: "2026-10-08T03:15:26Z"
+modules:
+    "":
+        dir_name: Managed Python Runner v3.3 平台
+        title: Managed Python Runner v3.3 平台
+        scope:
+            - pyproject.toml
+            - requirements.lock
+            - .gitignore
+        source_files: []
+        children:
+            - build_service
+            - nifi_integration
+            - operator_authoring
+            - publish_service
+            - runner_engine
+            - web
+        depends_on: []
+        related_to: []
+    build_service:
+        dir_name: Python 运行时镜像构建服务
+        title: Python 运行时镜像构建服务
+        scope:
+            - build_service/
+        source_files: []
+        children: []
+        depends_on: []
+        related_to: []
+    nifi_integration:
+        dir_name: NiFi Managed Python Runner 适配器
+        title: NiFi Managed Python Runner 适配器
+        scope:
+            - nifi/
+            - proto/
+        source_files: []
+        children: []
+        depends_on: []
+        related_to:
+            - path: runner_engine/core_runtime/publisher_gateway
+    operator_authoring:
+        dir_name: 虚拟算子作者工具链（AST 扫描、契约编译与快照）
+        title: 虚拟算子作者工具链（AST 扫描、契约编译与快照）
+        scope:
+            - operator_authoring/
+        source_files: []
+        children: []
+        depends_on: []
+        related_to:
+            - path: publish_service
+    publish_service:
+        dir_name: Managed Python Operator 发布服务
+        title: Managed Python Operator 发布服务
+        scope:
+            - publish_service/
+        source_files: []
+        children: []
+        depends_on: []
+        related_to:
+            - path: operator_authoring
+            - path: runner_engine/core_runtime/publisher_gateway
+            - path: web
+    runner_engine:
+        dir_name: Managed Python Runner v3.3 引擎
+        title: Managed Python Runner v3.3 引擎
+        scope:
+            - runner_engine/
+        source_files: []
+        children:
+            - runner_engine/core_runtime
+        depends_on: []
+        related_to: []
+    runner_engine/core_runtime:
+        dir_name: Managed Python Runner v3.3 核心运行时
+        title: Managed Python Runner v3.3 核心运行时
+        scope:
+            - runner_engine/
+        source_files: []
+        children:
+            - runner_engine/core_runtime/lifecycle_runtime
+            - runner_engine/core_runtime/pool_quota_state
+            - runner_engine/core_runtime/publisher_gateway
+        depends_on: []
+        related_to: []
+    runner_engine/core_runtime/lifecycle_runtime:
+        dir_name: Runner 运行时镜像生命周期管理
+        title: Runner 运行时镜像生命周期管理
+        scope:
+            - runner_engine/lifecycle_runtime.py
+            - runner_engine/lifecycle_service.py
+            - runner_engine/lifecycle_store.py
+        source_files: []
+        children: []
+        depends_on: []
+        related_to: []
+    runner_engine/core_runtime/pool_quota_state:
+        dir_name: 沙箱池、配额与运行状态持久化
+        title: 沙箱池、配额与运行状态持久化
+        scope:
+            - runner_engine/pool.py
+            - runner_engine/quota.py
+            - runner_engine/state.py
+        source_files: []
+        children: []
+        depends_on: []
+        related_to: []
+    runner_engine/core_runtime/publisher_gateway:
+        dir_name: Operator 发布、gRPC 网关与目录存储
+        title: Operator 发布、gRPC 网关与目录存储
+        scope:
+            - runner_engine/publisher.py
+            - runner_engine/gateway.py
+            - runner_engine/catalog.py
+        source_files: []
+        children: []
+        depends_on: []
+        related_to:
+            - path: nifi_integration
+            - path: publish_service
+    web:
+        dir_name: Managed Python Web BFF、统一控制台与可观测性前端
+        title: Managed Python Web BFF、统一控制台与可观测性前端
+        scope:
+            - web/
+        source_files: []
+        children: []
+        depends_on: []
+        related_to:
+            - path: publish_service

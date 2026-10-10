@@ -1,0 +1,10 @@
+schema_version: 1
+module_path: runner_engine/core_runtime/pool_quota_state
+title: 沙箱池、配额与运行状态持久化
+scope:
+    - runner_engine/pool.py
+    - runner_engine/quota.py
+    - runner_engine/state.py
+source_files: []
+depends_on: []
+related_to: []

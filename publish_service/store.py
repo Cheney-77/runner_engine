@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import uuid
 from contextlib import contextmanager
 from typing import Any, Iterator
@@ -37,11 +38,11 @@ class PublishStore:
         self.pool.close()
 
     def save_virtual_contract(
-        self,
-        workspace: str,
-        contract: VirtualOperatorContract,
-        *,
-        user_id: str = 1,
+            self,
+            workspace: str,
+            contract: VirtualOperatorContract,
+            *,
+            user_id: str,
     ):
         digest = contract_sha256(contract)
         payload = contract.model_dump(mode="json")
@@ -126,7 +127,7 @@ class PublishStore:
 
             return operator, row, True
 
-    def get_operator(self, operator_id: str, *, user_id: int = 1):
+    def get_operator(self, operator_id: str, *, user_id: str):
         with self.pool.connection() as conn:
             return conn.execute(
                 """
@@ -173,20 +174,21 @@ class PublishStore:
             else:
                 res = conn.execute(
                     """
-                    SELECT DISTINCT ON (o.id, target_platform)
+                    SELECT DISTINCT ON (o.id, target_platform, edge_identity)
                         o.id as operator_id,
                         o.name as operator_name,
                         o.display_name as operator_displayname,
                         o.description as operator_description,
                         bv.backend_contract_json->>'class_name' as operator_classname,
                         bv.backend_contract_json->>'target_platform' as target_platform,
+                        bv.options_json->'edgeIdentity' as edge_identity,
                         bv.backend_contract_json->>'properties' as operator_properties,
                         cv.id as contract_id,
                         cv.version as operator_version,
                         bv.id as variant_id,
                         bv.backend,
                         bv.published_ref as artifact_ref
-                        
+
                     FROM publish.operators o
                     JOIN publish.virtual_contract_versions cv
                         ON cv.operator_id = o.id
@@ -199,13 +201,15 @@ class PublishStore:
                         ORDER BY
                           o.id,
                           target_platform,
-                          cv.version DESC
+                          edge_identity,
+                          cv.version DESC,
+                          bv.updated_at DESC
                     """,
                     (user_id,),
                 ).fetchall()
             return res
 
-    def get_latest_contract(self, operator_id: str, *, user_id: int = 1):
+    def get_latest_contract(self, operator_id: str, *, user_id: str):
         with self.pool.connection() as conn:
             return conn.execute(
                 """
@@ -219,7 +223,7 @@ class PublishStore:
                 (operator_id, user_id),
             ).fetchone()
 
-    def get_contract(self, contract_id: str, *, user_id: int = 1):
+    def get_contract(self, contract_id: str, *, user_id: str):
         with self.pool.connection() as conn:
             return conn.execute(
                 """
@@ -244,15 +248,15 @@ class PublishStore:
             ).fetchall()
 
     def upsert_variant(
-        self,
-        *,
-        contract_id: str,
-        backend: str,
-        compiler_version: str,
-        variant_key: str,
-        options: dict[str, Any],
-        backend_contract_sha256: str,
-        backend_contract: dict[str, Any],
+            self,
+            *,
+            contract_id: str,
+            backend: str,
+            compiler_version: str,
+            variant_key: str,
+            options: dict[str, Any],
+            backend_contract_sha256: str,
+            backend_contract: dict[str, Any],
     ):
         variant_id = str(uuid.uuid4())
 
@@ -313,16 +317,66 @@ class PublishStore:
                 (job_id,),
             )
 
-    def mark_job_ready(
+    def update_job_progress(
         self,
         job_id: str,
-        variant_id: str,
-        *,
-        artifact_ref: str,
-        result: dict[str, Any],
+        event: dict[str, Any],
     ) -> None:
+        """Persist only the latest progress snapshot while the job is active.
+
+        READY overwrites result_json with the real publish result, so no schema
+        migration is needed.
+        """
         with self.pool.connection() as conn:
             conn.execute(
+                """
+                UPDATE publish.publish_jobs
+                SET result_json = %s
+                WHERE id = %s
+                  AND status IN ('PENDING', 'RUNNING')
+                """,
+                (Jsonb({"_progress": event}), job_id),
+            )
+
+    def get_publish_job(
+        self,
+        job_id: str,
+        *,
+        user_id: str,
+    ):
+        with self.pool.connection() as conn:
+            return conn.execute(
+                """
+                SELECT
+                    j.*,
+                    v.backend,
+                    v.id AS backend_variant_id,
+                    c.operator_id,
+                    o.user_id
+                FROM publish.publish_jobs j
+                JOIN publish.backend_variants v
+                  ON v.id = j.variant_id
+                JOIN publish.virtual_contract_versions c
+                  ON c.id = v.contract_id
+                JOIN publish.operators o
+                  ON o.id = c.operator_id
+                WHERE j.id = %s
+                  AND o.user_id = %s
+                """,
+                (job_id, user_id),
+            ).fetchone()
+
+    def mark_job_ready(
+            self,
+            job_id: str,
+            variant_id: str,
+            *,
+            artifact_ref: str,
+            result: dict[str, Any],
+            conn: Any | None = None,
+    ) -> None:
+        def update(active_conn) -> None:
+            active_conn.execute(
                 """
                 UPDATE publish.publish_jobs
                 SET status = 'READY', artifact_ref = %s, result_json = %s,
@@ -331,8 +385,7 @@ class PublishStore:
                 """,
                 (artifact_ref, Jsonb(result), job_id),
             )
-
-            conn.execute(
+            active_conn.execute(
                 """
                 UPDATE publish.backend_variants
                 SET status = 'PUBLISHED', published_ref = %s,
@@ -341,6 +394,14 @@ class PublishStore:
                 """,
                 (artifact_ref, Jsonb(result), variant_id),
             )
+
+        if conn is not None:
+            with conn.transaction():
+                update(conn)
+        else:
+            with self.pool.connection() as pooled_conn:
+                with pooled_conn.transaction():
+                    update(pooled_conn)
 
     def mark_job_failed(self, job_id: str, variant_id: str, error_message: str) -> None:
         message = error_message[-8192:]
@@ -371,14 +432,19 @@ class PublishStore:
 
     @contextmanager
     def edge_publish_lock(
-        self,
-        *,
-        user_id: int,
-        target_os: str,
-        target_arch: str,
-        python_version: str,
+            self,
+            *,
+            user_id: str,
+            target_os: str,
+            target_arch: str,
+            python_version: str,
+            token_pair: str,
+            edge_name: str,
     ) -> Iterator[Any]:
-        key = f"edge-native:{user_id}:{target_os}:{target_arch}:{python_version}"
+        key = json.dumps(
+            ["edge-native", user_id, target_os, target_arch, python_version, token_pair, edge_name],
+            separators=(",", ":"), ensure_ascii=False,
+        )
 
         with self.pool.connection() as conn:
             previous_autocommit = conn.autocommit
@@ -399,23 +465,28 @@ class PublishStore:
                 conn.autocommit = previous_autocommit
 
     def list_edge_deployments(
-        self,
-        *,
-        user_id: int,
-        target_os: str,
-        target_arch: str,
-        python_version: str,
-        exclude_operator_id: str | None = None,
-        conn: Any | None = None,
+            self,
+            *,
+            user_id: str,
+            target_os: str,
+            target_arch: str,
+            python_version: str,
+            token_pair: str,
+            edge_name: str,
+            exclude_operator_id: str | None = None,
+            conn: Any | None = None,
     ):
         clauses = [
             "user_id = %s",
             "target_os = %s",
             "target_arch = %s",
             "python_version = %s",
+            "token_pair = %s",
+            "edge_name = %s",
         ]
-        params: list[Any] = [user_id, target_os, target_arch, python_version]
-
+        params: list[Any] = [
+            user_id, target_os, target_arch, python_version, token_pair, edge_name
+        ]
         if exclude_operator_id is not None:
             clauses.append("operator_id <> %s")
             params.append(exclude_operator_id)
@@ -433,20 +504,20 @@ class PublishStore:
         with self.pool.connection() as pooled_conn:
             return pooled_conn.execute(sql, params).fetchall()
 
-    def list_edge_deployments_for_user(self, *, user_id: int):
+    def list_edge_deployments_for_user(self, *, user_id: str):
         with self.pool.connection() as conn:
             return conn.execute(
                 """
                 SELECT d.*, o.workspace, o.name, o.display_name, o.description
                 FROM publish.edge_native_deployments d
-                JOIN publish.operators o ON o.id = d.operator_id
+                JOIN publish.operators o ON o.id = d.operator_id AND o.user_id = d.user_id
                 WHERE d.user_id = %s
-                ORDER BY d.target_os, d.target_arch, d.python_version, o.display_name
+                ORDER BY d.target_os, d.target_arch, d.python_version, d.token_pair, d.edge_name, o.display_name
                 """,
                 (user_id,),
             ).fetchall()
 
-    def list_edge_bundles(self, *, user_id: int, limit: int = 50):
+    def list_edge_bundles(self, *, user_id: str, limit: int = 50):
         limit = max(1, min(int(limit), 200))
         with self.pool.connection() as conn:
             return conn.execute(
@@ -460,7 +531,7 @@ class PublishStore:
                 (user_id, limit),
             ).fetchall()
 
-    def get_edge_bundle(self, *, user_id: int, bundle_id: str):
+    def get_edge_bundle(self, *, user_id: str, bundle_id: str):
         with self.pool.connection() as conn:
             return conn.execute(
                 """
@@ -471,7 +542,7 @@ class PublishStore:
                 (bundle_id, user_id),
             ).fetchone()
 
-    def list_edge_operations(self, *, user_id: int, limit: int = 100):
+    def list_edge_operations(self, *, user_id: str, limit: int = 100):
         limit = max(1, min(int(limit), 300))
         with self.pool.connection() as conn:
             return conn.execute(
@@ -504,14 +575,44 @@ class PublishStore:
                 (user_id, limit),
             ).fetchall()
 
+    def get_latest_edge_bundle(
+            self, *, user_id: str, target_os: str, target_arch: str,
+            python_version: str, token_pair: str, edge_name: str,
+            conn: Any | None = None,
+    ):
+        sql = """
+            SELECT * FROM publish.edge_dependency_bundles
+            WHERE user_id = %s AND target_os = %s AND target_arch = %s
+              AND python_version = %s AND token_pair = %s AND edge_name = %s
+            ORDER BY revision DESC LIMIT 1
+        """
+        params = (user_id, target_os, target_arch, python_version, token_pair, edge_name)
+        if conn is not None:
+            return conn.execute(sql, params).fetchone()
+        with self.pool.connection() as pooled_conn:
+            return pooled_conn.execute(sql, params).fetchone()
+
+    def list_edge_bundle_members(self, *, bundle_id: str, conn: Any | None = None):
+        sql = """
+            SELECT operator_id, variant_id, package_name, requirements_json
+            FROM publish.edge_bundle_members WHERE bundle_id = %s
+            ORDER BY operator_id
+        """
+        if conn is not None:
+            return conn.execute(sql, (bundle_id,)).fetchall()
+        with self.pool.connection() as pooled_conn:
+            return pooled_conn.execute(sql, (bundle_id,)).fetchall()
+
     def next_edge_bundle_revision(
-        self,
-        *,
-        user_id: int,
-        target_os: str,
-        target_arch: str,
-        python_version: str,
-        conn: Any | None = None,
+            self,
+            *,
+            user_id: str,
+            target_os: str,
+            target_arch: str,
+            python_version: str,
+            token_pair: str,
+            edge_name: str,
+            conn: Any | None = None,
     ) -> int:
         sql = """
                 SELECT COALESCE(MAX(revision), 0) + 1 AS next_revision
@@ -520,9 +621,12 @@ class PublishStore:
                   AND target_os = %s
                   AND target_arch = %s
                   AND python_version = %s
+                  AND token_pair = %s
+                  AND edge_name = %s
                 """
-        params = (user_id, target_os, target_arch, python_version)
-
+        params = (
+            user_id, target_os, target_arch, python_version, token_pair, edge_name
+        )
         if conn is not None:
             row = conn.execute(sql, params).fetchone()
             return int(row["next_revision"])
@@ -536,30 +640,32 @@ class PublishStore:
         return int(row["next_revision"])
 
     def commit_edge_publish(
-        self,
-        *,
-        user_id: int,
-        operator_id: str,
-        variant_id: str,
-        target_os: str,
-        target_arch: str,
-        python_version: str,
-        uv_python_platform: str,
-        package_name: str,
-        native_artifact_file: str,
-        candidate_requirements: list[str],
-        bundle_id: str,
-        job_id: str,
-        published_result: dict[str, Any],
-        bundle_revision: int,
-        bundle_requirements: list[str],
-        requirements_lock: str,
-        lock_sha256: str,
-        bundle_artifact_ref: str,
-        bundle_artifact_sha256: str,
-        manifest: dict[str, Any],
-        members: list[dict[str, Any]],
-        conn: Any | None = None,
+            self,
+            *,
+            user_id: str,
+            operator_id: str,
+            variant_id: str,
+            target_os: str,
+            target_arch: str,
+            python_version: str,
+            token_pair: str,
+            edge_name: str,
+            uv_python_platform: str,
+            package_name: str,
+            native_artifact_file: str,
+            candidate_requirements: list[str],
+            bundle_id: str,
+            job_id: str,
+            published_result: dict[str, Any],
+            bundle_revision: int,
+            bundle_requirements: list[str],
+            requirements_lock: str,
+            lock_sha256: str,
+            bundle_artifact_ref: str,
+            bundle_artifact_sha256: str,
+            manifest: dict[str, Any],
+            members: list[dict[str, Any]],
+            conn: Any | None = None,
     ) -> str:
         deployment_id = str(uuid.uuid4())
 
@@ -568,12 +674,12 @@ class PublishStore:
                 """
                 INSERT INTO publish.edge_native_deployments(
                     id, user_id, operator_id, variant_id,
-                    target_os, target_arch, python_version, uv_python_platform,
-                    package_name, artifact_file, requirements_json
+                    target_os, target_arch, python_version, token_pair, edge_name,
+                    uv_python_platform, package_name, artifact_file, requirements_json
                 )
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 ON CONFLICT (
-                    user_id, operator_id, target_os, target_arch, python_version
+                    user_id, operator_id, target_os, target_arch, python_version, token_pair, edge_name
                 )
                 DO UPDATE SET
                     variant_id = EXCLUDED.variant_id,
@@ -591,6 +697,8 @@ class PublishStore:
                     target_os,
                     target_arch,
                     python_version,
+                    token_pair,
+                    edge_name,
                     uv_python_platform,
                     package_name,
                     native_artifact_file,
@@ -602,11 +710,11 @@ class PublishStore:
                 """
                 INSERT INTO publish.edge_dependency_bundles(
                     id, user_id, target_os, target_arch, python_version,
-                    uv_python_platform, revision, requirements_json,
+                    token_pair, edge_name, uv_python_platform, revision, requirements_json,
                     requirements_lock, lock_sha256, artifact_ref,
                     artifact_sha256, manifest_json
                 )
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 """,
                 (
                     bundle_id,
@@ -614,6 +722,8 @@ class PublishStore:
                     target_os,
                     target_arch,
                     python_version,
+                    token_pair,
+                    edge_name,
                     uv_python_platform,
                     bundle_revision,
                     Jsonb(bundle_requirements),

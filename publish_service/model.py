@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -78,8 +78,7 @@ class CreateVirtualContractRequest(ApiModel):
     constructor_bindings: dict[str, BindingSelection] = Field(default_factory=dict)
     argument_bindings: dict[str, BindingSelection] = Field(default_factory=dict)
     output: OutputSelection = Field(default_factory=OutputSelection)
-    # todo 后续要重新设计
-    user_id: Optional[str] = Field(default="1")
+    # user_id is deliberately absent: ownership comes from the authenticated token.
 
 
 class BackendRequest(ApiModel):

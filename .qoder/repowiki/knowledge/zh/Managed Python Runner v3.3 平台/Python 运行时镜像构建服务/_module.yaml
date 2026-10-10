@@ -1,0 +1,8 @@
+schema_version: 1
+module_path: build_service
+title: Python 运行时镜像构建服务
+scope:
+    - build_service/
+source_files: []
+depends_on: []
+related_to: []

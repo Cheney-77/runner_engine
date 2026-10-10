@@ -1,0 +1,12 @@
+schema_version: 1
+module_path: runner_engine/core_runtime/publisher_gateway
+title: Operator 发布、gRPC 网关与目录存储
+scope:
+    - runner_engine/publisher.py
+    - runner_engine/gateway.py
+    - runner_engine/catalog.py
+source_files: []
+depends_on: []
+related_to:
+    - path: nifi_integration
+    - path: publish_service

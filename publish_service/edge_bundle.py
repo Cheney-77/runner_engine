@@ -6,13 +6,13 @@ import shutil
 import tempfile
 import zipfile
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from operator_authoring.compiler import canonical_json
 
 from .backends.models import NativeTargetPlatform
 from .edge_dependencies import EdgeDependencyResolution, EdgeDependencyResolver
-
+from .edge_identity import edge_directory_name
 
 def _sha256_file(path: Path) -> str:
     digest = hashlib.sha256()
@@ -48,15 +48,21 @@ def build_edge_bundle(
     *,
     user_id: int,
     target: NativeTargetPlatform,
+    token_pair: str,
+    edge_name: str,
     revision: int,
     members: list[dict[str, Any]],
     resolution: EdgeDependencyResolution,
     resolver: EdgeDependencyResolver,
+    progress: Callable[
+        [str, str, dict[str, Any] | None],
+        None,
+    ] | None = None,
 ) -> tuple[Path, str, str, dict[str, Any]]:
     output_root.mkdir(parents=True, exist_ok=True)
 
     target_key = f"{target.os}-{target.arch}-py{target.python_version}"
-    target_root = output_root / f"user-{user_id}" / target_key
+    target_root = output_root / f"user-{user_id}" / target_key / edge_directory_name(token_pair, edge_name)
     target_root.mkdir(parents=True, exist_ok=True)
 
     with tempfile.TemporaryDirectory(prefix="mpr-edge-bundle-") as tmp:
@@ -66,6 +72,12 @@ def build_edge_bundle(
 
         processors_root.mkdir(parents=True)
         dependencies_root.mkdir(parents=True)
+        if progress is not None:
+            progress(
+                "ASSEMBLING_PROCESSORS",
+                "正在整理本次 Edge Bundle 中的 Native Processor",
+                {"processorCount": len(members)},
+            )
 
         manifest_members = []
         for member in sorted(members, key=lambda item: (str(item["operator_id"]), str(item["variant_id"]))):
@@ -87,6 +99,13 @@ def build_edge_bundle(
                 }
             )
 
+        if progress is not None:
+            progress(
+                "DOWNLOADING_DEPENDENCIES",
+                "正在下载并物化目标平台 Python 依赖",
+                {"packageCount": resolution.package_count},
+            )
+
         resolver.materialize(resolution, target=target, destination=dependencies_root)
 
         requirements_in = "\n".join(resolution.direct_requirements)
@@ -99,6 +118,7 @@ def build_edge_bundle(
         manifest = {
             "schema": "dsc.edge-native-bundle/v1",
             "userId": user_id,
+            "edgeIdentity": {"tokenPair": token_pair, "edgeName": edge_name},
             "revision": revision,
             "target": {
                 "os": target.os,
@@ -123,9 +143,23 @@ def build_edge_bundle(
         if final_zip.exists():
             final_zip.unlink()
 
+        if progress is not None:
+            progress(
+                "PACKAGING_BUNDLE",
+                "正在压缩 Edge Bundle",
+                {"revision": revision},
+            )
+
         with zipfile.ZipFile(final_zip, "w", zipfile.ZIP_DEFLATED) as archive:
             for path in sorted(staging.rglob("*")):
                 if path.is_file():
                     archive.write(path, path.relative_to(staging.parent).as_posix())
+    if progress is not None:
+        progress(
+            "VERIFYING_ARTIFACT",
+            "正在计算 Edge Bundle 校验值",
+            {"revision": revision},
+        )
+
     sha256, md5 = _file_hashes(final_zip)
     return final_zip, sha256, md5, manifest

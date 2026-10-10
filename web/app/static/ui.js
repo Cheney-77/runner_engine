@@ -781,6 +781,7 @@ function buildContractForm() {
 
 function collectBindings(records, label) {
   const collected = {};
+
   for (const [name, entry] of records.entries()) {
     if (!entry.checkbox.checked) {
       if (entry.param.required) {
@@ -788,16 +789,26 @@ function collectBindings(records, label) {
       }
       continue;
     }
+
     const selection = entry.read();
     if (!plain(selection)) {
       throw new Error(`${label}「${name}」的 BindingSelection 必须是 JSON object`);
     }
-    // collected[name] = selection;
+
+    const annotationType = typeof entry.param.annotation === "string"
+      ? entry.param.annotation.trim()
+      : "";
+
+    const selectedParameterType = typeof selection.parameterType === "string"
+      ? selection.parameterType.trim()
+      : "";
+
     collected[name] = {
       ...selection,
-      parameterType: entry.param.annotation,
+      parameterType: annotationType || selectedParameterType || "str",
     };
   }
+
   return collected;
 }
 
@@ -1103,73 +1114,231 @@ function summary(containerId, records) {
     if (value !== undefined && value !== null) addSummary(target, name, value);
   }
 }
+function renderCompileResult(response) {
+  $("compilePanel").classList.remove("hidden");
+  $("compileResponse").textContent = pretty(response.data);
+  summary("compileSummary", response.ok
+    ? [
+        ["Status", response.data?.status],
+        ["Backend", response.data?.backend],
+        ["Variant ID", response.data?.variantId],
+        ["Variant Key", response.data?.variantKey],
+        ["Parent Contract Version", response.data?.parentContractVersion],
+        ["Backend Contract SHA256", response.data?.backendContractSha256],
+      ]
+    : [["HTTP Status", response.status], ["Error", errorText(response)]]);
+
+  const status = response.data?.status;
+  const upstreamFailure =
+    typeof status === "string" && /^(failed|error)$/i.test(status);
+  const success = response.ok && !upstreamFailure;
+  const badge = $("compileStatusBadge");
+
+  badge.textContent = status || `HTTP ${response.status}`;
+  badge.className = success ? "success-pill" : "error-pill";
+  $("compileResultCaption").textContent = success
+    ? "操作已完成，详情见下方"
+    : `请求未完成 · HTTP ${response.status} · 详细错误见下方`;
+  $("compilePanel").classList.toggle("outcome-error", !success);
+
+  if (!success) {
+    $("compilePanel").querySelector("details").open = true;
+    showNotice(
+      `compile HTTP ${response.status}：${errorText(response)}`,
+      "error"
+    );
+  } else {
+    showNotice(
+      `compile 返回 HTTP ${response.status}；具体状态以响应为准。`,
+      "success"
+    );
+  }
+
+  $("compilePanel").scrollIntoView({behavior: "smooth", block: "start"});
+}
+
+function renderPublishJob(data, {httpStatus = null} = {}) {
+  const status = typeof data?.status === "string"
+    ? data.status.toUpperCase()
+    : "";
+  const ready = status === "READY";
+  const failed = status === "FAILED" || status === "ERROR";
+  const running = status === "RUNNING";
+  const pending = status === "PENDING";
+  const result = plain(data?.result) ? data.result : null;
+  const bundle = plain(result?.edgeBundle) ? result.edgeBundle : null;
+
+  const publishPanel = $("publishPanel");
+  publishPanel.classList.remove("hidden");
+  publishPanel.classList.toggle("outcome-running", pending || running);
+  publishPanel.classList.toggle("outcome-error", failed);
+
+  const resultIcon = publishPanel.querySelector(".section-icon");
+  if (resultIcon) {
+    resultIcon.textContent = ready ? "✓" : failed ? "×" : "…";
+    resultIcon.setAttribute(
+      "aria-label",
+      ready ? "发布成功" : failed ? "发布失败" : "发布进行中"
+    );
+  }
+
+  $("publishResponse").textContent = pretty(data);
+  summary("publishSummary", [
+    ["Job ID", data?.jobId],
+    ["Status", status || (httpStatus ? `HTTP ${httpStatus}` : "—")],
+    ["Backend", data?.backend],
+    ["Artifact Ref", data?.artifactRef],
+    ["Runner Release ID", result?.releaseId],
+    ["Runtime Environment Key", result?.envKey],
+    ["Native Processor Type", result?.processorType],
+    ["Native Artifact File", result?.artifactFile],
+    ["Edge Bundle ID", bundle?.bundleId],
+    ["Edge Bundle Revision", bundle?.revision],
+    ["Bundle Reused", result?.reusedExistingBundle === true
+      ? "是"
+      : result?.reusedExistingBundle === false ? "否" : null],
+  ]);
+
+  const badge = $("publishStatusBadge");
+  badge.textContent = status || (httpStatus ? `HTTP ${httpStatus}` : "UNKNOWN");
+  badge.className = ready
+    ? "success-pill"
+    : failed
+      ? "error-pill"
+      : "label-pill";
+
+  $("publishResultCaption").textContent = ready
+    ? "发布已完成，详情见下方"
+    : failed
+      ? "发布失败，详细错误见下方"
+      : running
+        ? "后台正在执行发布任务，实时进度见下方"
+        : pending
+          ? "发布任务已创建，正在等待后台 Worker"
+          : "发布任务状态已更新";
+
+  const native = $("nativeNotice");
+  if (ready && result?.deploymentRequired === true) {
+    native.textContent = (
+      "Native package 已生成，但尚未部署到 NiFi。\n" +
+      `artifactFile: ${result.artifactFile || "见真实响应"}\n` +
+      `deploymentHint: ${result.deploymentHint || "请检查部署流程"}`
+    );
+    native.classList.remove("hidden");
+  } else {
+    native.classList.add("hidden");
+  }
+
+  if (failed) {
+    $("publishPanel").querySelector("details").open = true;
+  }
+
+  return {status, ready, failed, running, pending, result};
+}
+
+function publishProgressClient() {
+  const client = globalThis.PublishProgress;
+  if (!client ||
+      typeof client.reset !== "function" ||
+      typeof client.monitor !== "function") {
+    throw new Error(
+      "实时发布进度组件未加载。请确认 publish-progress.js 已由页面加载。"
+    );
+  }
+  return client;
+}
+
 async function backendAction(action) {
   if (!st.created?.operatorId) throw new Error("请先创建 Virtual Contract");
+
   const operatorId = safePart(st.created.operatorId, "operatorId");
   const backend = chosenBackend();
   const options = currentOptions();
   const path = `/api/operators/${operatorId}/backends/${backend}/${action}`;
   const response = await api("POST", path, {options});
+
   if (action === "compile") {
-    $("compilePanel").classList.remove("hidden");
-    $("compileResponse").textContent = pretty(response.data);
-    summary("compileSummary", response.ok
-      ? [
-          ["Status", response.data?.status],
-          ["Backend", response.data?.backend],
-          ["Variant ID", response.data?.variantId],
-          ["Variant Key", response.data?.variantKey],
-          ["Parent Contract Version", response.data?.parentContractVersion],
-          ["Backend Contract SHA256", response.data?.backendContractSha256],
-        ]
-      : [["HTTP Status", response.status], ["Error", errorText(response)]]);
-  } else {
-    $("publishPanel").classList.remove("hidden");
-    $("publishResponse").textContent = pretty(response.data);
-    summary("publishSummary", response.ok
-      ? [
-          ["Job ID", response.data?.jobId],
-          ["Status", response.data?.status],
-          ["Backend", response.data?.backend],
-          ["Artifact Ref", response.data?.artifactRef],
-          ["Runner Release ID", response.data?.result?.releaseId],
-          ["Runtime Environment Key", response.data?.result?.envKey],
-          ["Native Processor Type", response.data?.result?.processorType],
-          ["Native Artifact File", response.data?.result?.artifactFile],
-        ]
-      : [["HTTP Status", response.status], ["Error", errorText(response)]]);
-    const native = $("nativeNotice");
-    const result = response.data?.result;
-    if (response.ok && (result?.deploymentRequired === true)) {
-      native.textContent = (
-        "Native package 已生成，但尚未部署到 NiFi。\n" +
-        `artifactFile: ${result.artifactFile || "见真实响应"}\n` +
-        `deploymentHint: ${result.deploymentHint || "请检查部署流程"}`
-      );
-      native.classList.remove("hidden");
-    } else {
-      native.classList.add("hidden");
-    }
+    renderCompileResult(response);
+    return;
   }
-  const panel = $(action === "compile" ? "compilePanel" : "publishPanel");
-  const status = response.data?.status;
-  const upstreamFailure = typeof status === "string" && /^(failed|error)$/i.test(status);
-  const success = response.ok && !upstreamFailure;
-  const badge = $(action === "compile" ? "compileStatusBadge" : "publishStatusBadge");
-  const caption = $(action === "compile" ? "compileResultCaption" : "publishResultCaption");
-  badge.textContent = status || `HTTP ${response.status}`;
-  badge.className = success ? "success-pill" : "error-pill";
-  caption.textContent = success
-    ? "操作已完成，详情见下方"
-    : `请求未完成 · HTTP ${response.status} · 详细错误见下方`;
-  panel.classList.toggle("outcome-error", !success);
-  if (!success) {
-    panel.querySelector("details").open = true;
-    showNotice(`${action} HTTP ${response.status}：${errorText(response)}`, "error");
-  } else {
-    showNotice(`${action} 返回 HTTP ${response.status}；具体状态以响应为准。`, "success");
+
+  if (action !== "publish") {
+    throw new Error(`不支持的 Backend Action：${action}`);
   }
-  panel.scrollIntoView({behavior: "smooth", block: "start"});
+
+  if (!response.ok) {
+    const failedJob = {
+      status: "FAILED",
+      backend,
+      error: errorText(response),
+      response: response.data,
+    };
+    const progressClient = publishProgressClient();
+    progressClient.reset(failedJob);
+    progressClient.finish(failedJob);
+    renderPublishJob(failedJob, {httpStatus: response.status});
+    $("publishPanel").scrollIntoView({behavior: "smooth", block: "start"});
+    showNotice(
+      "发布请求失败；详细错误已显示在“实时发布进度”底部。",
+      "error"
+    );
+    return;
+  }
+
+  if (!plain(response.data) ||
+      typeof response.data.jobId !== "string" ||
+      !response.data.jobId) {
+    const failedJob = {
+      status: "FAILED",
+      backend,
+      error: "Publish Service 接受请求后没有返回 jobId",
+      response: response.data,
+    };
+    const progressClient = publishProgressClient();
+    progressClient.reset(failedJob);
+    progressClient.finish(failedJob);
+    renderPublishJob(failedJob, {httpStatus: response.status});
+    $("publishPanel").scrollIntoView({behavior: "smooth", block: "start"});
+    showNotice(
+      "发布请求状态异常；详细信息已显示在“实时发布进度”底部。",
+      "error"
+    );
+    return;
+  }
+
+  const progressClient = publishProgressClient();
+  progressClient.reset(response.data);
+  renderPublishJob(response.data, {httpStatus: response.status});
+  $("publishPanel").scrollIntoView({behavior: "smooth", block: "start"});
+  showNotice(
+    `发布任务 ${response.data.jobId} 已创建；正在接收后台实时进度。`,
+    "success"
+  );
+
+  const finalJob = await progressClient.monitor(response.data.jobId);
+  const finalState = renderPublishJob(finalJob);
+
+  if (finalState.failed) {
+    showNotice(
+      "发布失败；详细错误已显示在“实时发布进度”底部。",
+      "error"
+    );
+    return;
+  }
+
+  if (!finalState.ready) {
+    throw new Error(
+      `发布任务结束时状态异常：${finalState.status || "UNKNOWN"}`
+    );
+  }
+
+  const reused = finalState.result?.reusedExistingBundle === true;
+  showNotice(
+    reused
+      ? `发布完成：${finalJob.jobId}；已复用现有 Edge Bundle。`
+      : `发布完成：${finalJob.jobId}`,
+    "success"
+  );
 }
 $("compileBtn").addEventListener("click", () =>
   busy("compileBtn", async () => backendAction("compile"))

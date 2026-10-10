@@ -13,9 +13,10 @@ from operator_authoring.compiler import ExecutionPlan
 from operator_authoring.model import VirtualOperatorContract
 from operator_authoring.snapshot import read_requirements
 
+from ..edge_identity import normalize_edge_identity
+
 from .base import backend_variant_key
 from .models import NativeProperty, NativeTargetPlatform, NifiNativeBackendContract
-
 
 COMPILER_VERSION = "nifi-native-contract-v2"
 
@@ -68,9 +69,9 @@ def supported_native_targets(default_python_version: str) -> list[dict[str, Any]
 
 
 def normalize_target_platform(
-    options: dict[str, Any],
-    *,
-    default_python_version: str,
+        options: dict[str, Any],
+        *,
+        default_python_version: str,
 ) -> NativeTargetPlatform:
     raw = options.get("targetPlatform") or options.get("target_platform")
     if not isinstance(raw, dict):
@@ -101,16 +102,17 @@ def normalize_target_platform(
 
 
 def compile_nifi_native_contract(
-    *,
-    contract_id: str,
-    contract_version: int,
-    parent: VirtualOperatorContract,
-    plan: ExecutionPlan,
-    source_path: Path,
-    options: dict[str, Any],
-    default_python_version: str = "3.12",
+        *,
+        contract_id: str,
+        contract_version: int,
+        parent: VirtualOperatorContract,
+        plan: ExecutionPlan,
+        source_path: Path,
+        options: dict[str, Any],
+        default_python_version: str = "3.12",
 ) -> NifiNativeBackendContract:
     requirements = read_requirements(source_path)
+    edge_identity = normalize_edge_identity(options.get("edgeIdentity") or options.get("edge_identity"))
     target = normalize_target_platform(
         options,
         default_python_version=default_python_version,
@@ -133,6 +135,7 @@ def compile_nifi_native_contract(
             "pythonVersion": target.python_version,
             "uvPythonPlatform": target.uv_python_platform,
         },
+        "edgeIdentity": edge_identity,
     }
     variant_key = backend_variant_key(
         contract_sha256=plan.contract_sha256,
@@ -240,7 +243,7 @@ def _decode(raw, codec):
         if isinstance(raw, str):
             return json.loads(raw)
         return raw
-        
+
     if codec == "binary_stream":
         if isinstance(raw, io.BytesIO):
             return raw
@@ -357,13 +360,14 @@ def _json_default(value):
 
 def _encode_payload(value, codec):
     if codec == "bytes":
-        if isinstance(value, bytes):
-            return value
-        if isinstance(value, bytearray):
-            return bytes(value)
+        if isinstance(value, (bytes, bytearray, memoryview)):
+        return bytes(value)
         if isinstance(value, str):
             return value.encode("utf-8")
-        raise TypeError("bytes output codec expects bytes, bytearray or str")
+        raise TypeError(
+            f"output.payload codec='bytes' expects bytes-like or str, "
+            f"got {type(value).__name__}; use codec='json' for dict/list"
+        )
 
     if codec == "text":
         return str(value)
@@ -502,8 +506,8 @@ class __CLASS_NAME__(FlowFileTransform):
 
 
 def _native_source(
-    contract: NifiNativeBackendContract,
-    plan: ExecutionPlan,
+        contract: NifiNativeBackendContract,
+        plan: ExecutionPlan,
 ) -> str:
     plan_json = json.dumps(
         plan.model_dump(mode="json"),
@@ -531,11 +535,11 @@ def _native_source(
 
 
 def write_native_package(
-    output_root: Path,
-    *,
-    contract: NifiNativeBackendContract,
-    plan: ExecutionPlan,
-    source_path: Path,
+        output_root: Path,
+        *,
+        contract: NifiNativeBackendContract,
+        plan: ExecutionPlan,
+        source_path: Path,
 ) -> Path:
     output_root.mkdir(parents=True, exist_ok=True)
 

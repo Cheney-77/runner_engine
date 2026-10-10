@@ -1,0 +1,9 @@
+schema_version: 1
+module_path: web
+title: Managed Python Web BFF、统一控制台与可观测性前端
+scope:
+    - web/
+source_files: []
+depends_on: []
+related_to:
+    - path: publish_service
